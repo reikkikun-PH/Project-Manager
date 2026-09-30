@@ -51,15 +51,21 @@ cd pm
 (`Project List/`, credentials, and the tunnel binary are intentionally not in
 git — you add them below. `Project List/` is auto-created on first run.)
 
-## 4. Download cloudflared (pick your arch from step 2)
+## 4. Install cloudflared (Termux package — built for Android)
 
 ```sh
-# aarch64:
-curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
-# 32-bit ARM instead:
-# curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm
-chmod +x cloudflared
-./cloudflared --version
+pkg install -y cloudflared
+cloudflared --version
+```
+
+`host.py` finds it on PATH automatically. Do **not** use the GitHub
+`cloudflared-linux-*` binaries here — Android's linker rejects them
+(`unexpected e_type`). Manual fallback only if the package is missing:
+
+```sh
+# aarch64: curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
+# 32-bit:  curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm
+# chmod +x cloudflared
 ```
 
 ## 5. Create your admin login
