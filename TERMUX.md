@@ -7,6 +7,23 @@ ARM64 `cloudflared` binary, so the whole stack runs on a phone.
 > shared storage (`/sdcard`) as `noexec` — binaries and scripts won't run
 > from there.
 
+## 0. Automatic install (recommended)
+
+In Termux (F-Droid build):
+
+```sh
+curl -L -o install-termux.sh https://raw.githubusercontent.com/reikkikun-PH/Project-Manager/main/install-termux.sh
+sh install-termux.sh
+```
+
+That installs packages, detects your chip, clones this repo to `~/pm`,
+downloads the right `cloudflared`, and creates `credentials.json`
+(it never overwrites existing files — safe to re-run).
+Options: `INSTALL_DIR=~/mysites sh install-termux.sh`,
+`ADMIN_PASS='s3cret!' sh install-termux.sh`,
+`sh install-termux.sh --force-cloudflared`.
+Then skip to step 6. Manual steps below if you prefer doing it by hand.
+
 ## 1. Install Termux
 
 Install **Termux from F-Droid** (the Play Store build is outdated and
