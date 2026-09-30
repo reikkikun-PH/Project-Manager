@@ -59,15 +59,35 @@ def port_open(port):
         return False
 
 
+def _cf_works(cand):
+    """Smoke-test a tunnel binary (rejects Android-incompatible builds)."""
+    try:
+        r = subprocess.run([cand, "--version"],
+                           capture_output=True, timeout=15)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def find_cloudflared():
+    cands = []
     if IS_WINDOWS:
         cand = os.path.join(BASE_DIR, "cloudflared.exe")
-        return cand if os.path.isfile(cand) else None
-    for name in ("cloudflared", "cloudflared-linux"):
-        cand = os.path.join(BASE_DIR, name)
-        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+        if os.path.isfile(cand):
+            cands.append(cand)
+    else:
+        for name in ("cloudflared", "cloudflared-linux"):
+            cand = os.path.join(BASE_DIR, name)
+            if os.path.isfile(cand):
+                cands.append(cand)
+    which = shutil.which("cloudflared")
+    if which and which not in cands:
+        cands.append(which)
+    for cand in cands:
+        if _cf_works(cand):
             return cand
-    return shutil.which("cloudflared")
+        log(f"Skipping broken tunnel binary: {cand}")
+    return None
 
 
 def clean_stale():
@@ -140,9 +160,9 @@ def main():
 
     cf = find_cloudflared()
     if not cf:
-        log("ERROR: cloudflared not found next to host.py "
-            "(cloudflared.exe on Windows, ./cloudflared on Linux).")
-        log("Download: https://developers.cloudflare.com/cloudflare-one/"
+        log("ERROR: no working cloudflared found next to host.py or on PATH.")
+        log("Windows: put cloudflared.exe next to host.py. Termux: pkg install cloudflared.")
+        log("Linux/macOS: https://developers.cloudflare.com/cloudflare-one/"
             "connections/connect/networks/downloads/")
         return 1
     log(f"cloudflared: {cf}")

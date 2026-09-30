@@ -39,10 +39,10 @@ die() { echo "[ERROR] $*" >&2; exit 1; }
 [ -n "${PREFIX:-}" ] || die "Not running in Termux (no \$PREFIX). Install Termux from F-Droid first."
 command -v pkg >/dev/null 2>&1 || die "'pkg' not found - is this Termux?"
 
-# --- 1. System packages ---
-say "Installing packages (python unzip curl git nano procps)..."
+# --- 1. System packages (cloudflared from Termux repo: built for Android) ---
+say "Installing packages (python unzip curl git nano procps cloudflared)..."
 pkg update -y || die "'pkg update' failed - check your connection."
-pkg install -y python unzip curl git nano procps || die "'pkg install' failed."
+pkg install -y python unzip curl git nano procps cloudflared || die "'pkg install' failed."
 
 # --- 2. CPU arch -> cloudflared asset ---
 ARCH="$(uname -m)"
@@ -65,8 +65,20 @@ else
 fi
 cd "$INSTALL_DIR" || die "Cannot cd to $INSTALL_DIR."
 
-# --- 4. cloudflared binary (skip if present, unless forced) ---
-if [ -x "./cloudflared" ] && [ "$FORCE_CF" -eq 0 ]; then
+# --- 4. cloudflared: Termux package first, GitHub binary as fallback ---
+# (GitHub's linux builds are not PIE - Android's linker rejects them with
+#  "unexpected e_type". The Termux package is built for Android.)
+CF_BIN=""
+if [ -e "./cloudflared" ] && ! ./cloudflared --version >/dev/null 2>&1; then
+  say "Removing broken ./cloudflared binary..."
+  rm -f ./cloudflared
+fi
+if [ "$FORCE_CF" -eq 0 ] && command -v cloudflared >/dev/null 2>&1 \
+    && cloudflared --version >/dev/null 2>&1; then
+  CF_BIN="cloudflared"
+  say "Using system cloudflared: $(command -v cloudflared)"
+elif [ -x "./cloudflared" ] && [ "$FORCE_CF" -eq 0 ]; then
+  CF_BIN="./cloudflared"
   say "cloudflared already present - skipping download."
 else
   say "Downloading $CF_ASSET ..."
@@ -75,9 +87,10 @@ else
     "https://github.com/cloudflare/cloudflared/releases/latest/download/$CF_ASSET" \
     || die "Download failed."
   chmod +x ./cloudflared
+  CF_BIN="./cloudflared"
 fi
-./cloudflared --version >/dev/null 2>&1 || die "Downloaded cloudflared won't execute."
-say "cloudflared OK: $(./cloudflared --version 2>/dev/null | head -n 1)"
+"$CF_BIN" --version >/dev/null 2>&1 || die "No working cloudflared found."
+say "cloudflared OK: $($CF_BIN --version 2>/dev/null | head -n 1)"
 
 # --- 5. Admin login (never overwrite an existing one) ---
 if [ -f "./credentials.json" ]; then
