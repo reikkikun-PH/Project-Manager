@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <link rel="icon" href="data:," />
+  <title>ProjectFlow &mdash; Host Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg0: #101114;
+      --card: #16181d;
+      --card2: #1b1e24;
+      --line: #2b2f37;
+      --text: #faf6ec;
+      --muted: #c4b9a5;
+      --accent: #ff4b1f;
+      --accent-soft: rgba(255, 75, 31, 0.14);
+      --green: #35d07f;
+      --red: #ff5a5a;
+      --amber: #e8a13d;
+      --radius: 18px;
+      --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --dot: "DotGothic16", "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      padding: 28px 16px calc(28px + env(safe-area-inset-bottom));
+      background:
+        radial-gradient(circle, rgba(255, 255, 255, 0.055) 1px, transparent 1.6px) 0 0 / 22px 22px,
+        linear-gradient(158deg, #ba9b7a 0%, #9d7d5d 16%, #564c44 34%, #222226 58%, #101113 78%, #0a0a0d 100%);
+      background-attachment: fixed;
+    }
+    .wrap { width: 100%; max-width: 1040px; margin: 0 auto; }
+
+    /* ---------- masthead ---------- */
+    header.top {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      gap: 14px; margin-bottom: 22px; flex-wrap: wrap;
+    }
+    .brand small {
+      display: block; font-size: 0.72rem; letter-spacing: 4px; font-weight: 600;
+      color: rgba(250, 246, 236, 0.9); margin-bottom: 6px;
+      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+    }
+    .brand h1 {
+      font-family: var(--dot); font-weight: 400;
+      font-size: clamp(1.9rem, 5vw, 2.9rem);
+      letter-spacing: 6px; line-height: 1;
+      color: #f5efe2;
+      text-shadow: 0 0 18px rgba(255, 120, 60, 0.25);
+    }
+    .brand h1 span { color: var(--accent); }
+    .sysline {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 10px; font-size: 0.82rem; font-weight: 500; letter-spacing: 1.5px;
+      color: #faf6ec;
+      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+    }
+    .sysline .pulse {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent); flex-shrink: 0;
+      box-shadow: 0 0 10px var(--accent);
+      animation: blink 2s infinite;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .live {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.68rem; letter-spacing: 2px; color: var(--accent);
+      border: 1px solid rgba(255, 75, 31, 0.45); border-radius: 20px;
+      padding: 4px 10px; margin-left: 8px; background: var(--accent-soft);
+    }
+    .live i {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 8px var(--accent);
+      animation: blink 1.4s infinite;
+    }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; position: relative; }
+    #sessionInfo { font-size: 0.75rem; letter-spacing: 1px; color: var(--muted); }
+    /* Sign-in dropdown: overlays instead of pushing content, animates open */
+    #loginCard.dropdown {
+      position: absolute; top: calc(100% + 10px); right: 0;
+      width: min(92vw, 360px); margin: 0; z-index: 60;
+    }
+    #loginCard.drop-in { animation: dropIn 0.18s ease-out; }
+    @keyframes dropIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+    /* Narrow dropdown: stack fields full-width like the other cards */
+    #loginCard .login-grid { grid-template-columns: 1fr; }
+    #loginCard .btn { width: 100%; }
+
+    /* ---------- panels & controls ---------- */
+    .btn {
+      font: inherit; font-size: 0.8rem; font-weight: 500; letter-spacing: 1.5px; text-transform: uppercase;
+      cursor: pointer; border-radius: 12px;
+      border: 1px solid #3d434d; background: #262b34; color: var(--text);
+      padding: 10px 16px; min-height: 44px;
+      transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+    }
+    .btn:hover { border-color: var(--accent); box-shadow: 0 0 14px rgba(255, 75, 31, 0.25); }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary {
+      background: linear-gradient(180deg, #ff5a2a, #e23c10);
+      border-color: #ff5a2a; color: #fff; font-weight: 600;
+      box-shadow: 0 4px 18px rgba(255, 75, 31, 0.35);
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-danger { color: #ff8a80; }
+    .btn:disabled { opacity: 0.55; cursor: default; box-shadow: none; }
+    .card {
+      background: linear-gradient(180deg, var(--card2), var(--card));
+      border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    }
+    .card h2 {
+      font-family: var(--dot); font-weight: 400; font-size: 1.05rem;
+      letter-spacing: 3px; margin-bottom: 14px; color: #f5efe2;
+    }
+    .card h2 .num { color: var(--accent); margin-right: 10px; }
+    .login-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; }
+    input, select {
+      font: inherit; font-size: 0.85rem; color: var(--text); background: #0e1013;
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 10px 12px; min-height: 44px; width: 100%; outline: none;
+    }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 12px rgba(255, 75, 31, 0.25); }
+    input[type="file"] { padding: 8px 10px; font-size: 0.75rem; color: var(--muted); }
+    select option { background: #14161a; }
+    .hint { font-size: 0.78rem; letter-spacing: 0.4px; color: #b7ab93; margin-top: 10px; line-height: 1.6; }
+    .hint code { color: var(--accent); }
+    .dropzone {
+      position: relative; overflow: hidden;
+      background: linear-gradient(180deg, #1c1f26, #14161b);
+      border: 1px dashed #3a4049; border-radius: var(--radius);
+      padding: 28px 18px 24px;
+      display: flex; flex-direction: column; align-items: center; gap: 12px;
+      cursor: pointer; text-align: center; outline: none;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .dropzone::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent), transparent 70%);
+      opacity: 0.7;
+    }
+    .dropzone:hover, .dropzone:focus-visible {
+      transform: translateY(-2px);
+      border-color: rgba(255, 75, 31, 0.5);
+      box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 75, 31, 0.12);
+    }
+    .dropzone.drag {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      background: linear-gradient(180deg, #262029, #17141b);
+      box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55), 0 0 32px rgba(255, 75, 31, 0.35);
+    }
+    .dropzone .cloud {
+      color: var(--accent);
+      filter: drop-shadow(0 0 10px rgba(255, 75, 31, 0.6));
+    }
+    .drop-pill {
+      background: var(--accent);
+      border: 1px solid var(--accent); color: #fff;
+      font-size: 0.8rem; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase;
+      border-radius: 12px; padding: 10px 22px; min-height: 44px;
+      display: inline-flex; align-items: center;
+    }
+    .drop-dots {
+      height: 8px; width: 100%; opacity: 0.8;
+      background: radial-gradient(circle, rgba(242, 237, 228, 0.4) 1.2px, transparent 1.8px) 0 0 / 10px 8px repeat-x;
+    }
+    .drop-sub { font-size: 0.66rem; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+    .status { font-size: 0.8rem; margin-top: 10px; min-height: 20px; letter-spacing: 0.5px; }
+    .status.ok { color: var(--green); }
+    .status.err { color: var(--red); }
+
+    /* ---------- project grid ---------- */
+    .count { color: rgba(250, 246, 236, 0.92); font-size: 0.78rem; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+    .proj {
+      background: linear-gradient(180deg, #1c1f26, #14161b);
+      border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 18px;
+      display: flex; flex-direction: column; gap: 10px; min-width: 0;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+      position: relative; overflow: hidden;
+    }
+    .proj::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent), transparent 70%);
+      opacity: 0.7;
+    }
+    .proj:hover { transform: translateY(-3px); border-color: rgba(255, 75, 31, 0.5); box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 75, 31, 0.12); }
+    .proj-head { display: flex; align-items: center; gap: 10px; }
+    .pnum { font-family: var(--dot); font-size: 0.85rem; color: var(--muted); letter-spacing: 1px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.online { background: var(--green); box-shadow: 0 0 12px var(--green); }
+    .dot.running { background: var(--green); box-shadow: 0 0 12px var(--green); }
+    .dot.starting { background: var(--amber); box-shadow: 0 0 12px var(--amber); animation: blink 1.2s infinite; }
+    .dot.warn { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+    .dot.offline, .dot.missing { background: var(--red); box-shadow: 0 0 10px rgba(255, 90, 90, 0.8); }
+    .proj-name {
+      font-family: var(--dot); font-size: 1.05rem; letter-spacing: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f5efe2;
+    }
+    .tag {
+      font-size: 0.66rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 20px;
+      background: #0e1013; color: #d8cdb8;
+      border: 1px solid #3a4049; margin-left: auto; flex-shrink: 0;
+    }
+    .tag.lock { color: var(--accent); border-color: rgba(255, 75, 31, 0.5); }
+    .dots {
+      height: 8px; opacity: 0.8;
+      background: radial-gradient(circle, rgba(242, 237, 228, 0.4) 1.2px, transparent 1.8px) 0 0 / 10px 8px repeat-x;
+    }
+    .proj-target { font-size: 0.76rem; letter-spacing: 0.5px; color: #b7ab93; overflow-wrap: anywhere; line-height: 1.6; }
+    .proj-state { font-size: 0.72rem; font-weight: 500; letter-spacing: 2.5px; text-transform: uppercase; color: rgba(250, 246, 236, 0.85); }
+    .proj-state b { color: var(--accent); font-weight: 600; }
+    .proj-url { font-size: 0.72rem; color: var(--accent); overflow-wrap: anywhere; }
+    .proj-actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+    .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; text-decoration: none; text-align: center; }
+    .empty { color: var(--muted); text-align: center; padding: 28px; grid-column: 1 / -1; font-size: 0.8rem; letter-spacing: 2px; }
+
+    /* ---------- system monitor ---------- */
+    .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .sys-box { background: #0e1013; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+    .sys-label { font-size: 0.66rem; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+    .sys-val { font-family: var(--dot); font-size: 1.7rem; letter-spacing: 2px; color: #f5efe2; margin: 6px 0 8px; }
+    .sys-val small { font-size: 0.8rem; color: var(--muted); letter-spacing: 1px; }
+    .sys-val .accent { color: var(--accent); }
+    .sys-sub { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.5px; margin-top: 8px; }
+    .bar { height: 10px; background: #05070a; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 0; border-radius: 6px;
+      background: linear-gradient(90deg, #e23c10, #ff7a3d);
+      box-shadow: 0 0 10px rgba(255, 75, 31, 0.55); transition: width 0.6s ease; }
+    .gpu-row { padding: 10px 0; border-top: 1px dashed var(--line); }
+    .gpu-row:first-child { border-top: none; }
+    .gpu-name { font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text); overflow-wrap: anywhere; }
+    footer.foot {
+      margin-top: 26px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+      font-size: 0.72rem; font-weight: 500; letter-spacing: 3px; color: rgba(250, 246, 236, 0.8); text-transform: uppercase;
+      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+    }
+    footer.foot .accent { color: var(--accent); }
+
+    /* ---------- modal ---------- */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, 0.72); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+    .modal { background: var(--card2); border: 1px solid var(--line); border-radius: var(--radius); width: min(94vw, 520px); max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0,0,0,0.6); }
+    .modal-head { padding: 16px; border-bottom: 1px solid var(--line); font-family: var(--dot); letter-spacing: 2px; }
+    .modal-path { font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; margin-top: 6px; font-family: var(--mono); letter-spacing: 0; }
+    .modal-foot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+    .modal-foot .btn { flex: 1; }
+    @media (max-width: 640px) {
+      body { padding: 18px 10px calc(18px + env(safe-area-inset-bottom)); }
+      .login-grid { grid-template-columns: 1fr; }
+      header.top { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <small>PROJECT MANAGER</small>
+        <h1>HOST<span>&bull;</span>DASHBOARD</h1>
+        <div class="sysline">
+          <span class="pulse"></span>
+          <span id="sysStatus">CONNECTING&hellip;</span>
+          <span class="live"><i></i>LIVE</span>
+        </div>
+        <div class="sysline" style="margin-top:6px; opacity:0.7;"><span>One address, many projects</span></div>
+      </div>
+      <div class="controls">
+        <span id="sessionInfo"></span>
+        <button type="button" id="authBtn" class="btn">Sign in</button>
+        <button type="button" id="refreshBtn" class="btn">Refresh</button>
+        <section class="card dropdown" id="loginCard" style="display:none;">
+          <h2><span class="num">00</span>SIGN IN</h2>
+          <div class="login-grid">
+            <input type="text" id="loginUser" placeholder="Username" aria-label="Username" maxlength="32" />
+            <input type="password" id="loginPass" placeholder="Password" aria-label="Password" />
+            <button type="button" id="loginBtn" class="btn btn-primary">Sign in</button>
+          </div>
+          <p class="status" id="loginStatus"></p>
+        </section>
+      </div>
+    </header>
+
+    <section class="card" id="manageAdd" style="display:none;">
+      <h2><span class="num">+</span>UPLOAD A PROJECT</h2>
+      <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Drop zip files here or click to choose">
+        <svg class="cloud" viewBox="0 0 24 24" width="52" height="52" fill="currentColor" aria-hidden="true"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" /></svg>
+        <span class="drop-pill">Drop .zip here to host it</span>
+        <span class="drop-dots"></span>
+        <span class="drop-sub">or click to choose files</span>
+        <input type="file" id="zipFile" accept=".zip,application/zip" multiple hidden />
+      </div>
+      <p class="hint">Drop a zip above and it appears below as its own site. Apps start on their own.</p>
+      <p class="status" id="formStatus"></p>
+    </section>
+
+    <p class="count" id="projCount"></p>
+    <div class="grid" id="projGrid" style="margin-top:10px;"></div>
+
+    <section class="card" id="sysCard" style="display:none; margin-top:16px;">
+      <h2><span class="num">HW</span>SYSTEM MONITOR <span class="live" style="margin-left:10px;"><i></i>HOST</span></h2>
+      <div class="sys-grid">
+        <div class="sys-box">
+          <div class="sys-label">CPU <span id="sysCpuCount"></span></div>
+          <div class="sys-val"><span class="accent" id="sysCpuPct">--</span><small> % USED</small></div>
+          <div class="bar"><i id="sysCpuBar"></i></div>
+          <div class="sys-sub" id="sysCpuSub">-- cores</div>
+          <div id="sysCpuCores" style="margin-top:8px;"></div>
+        </div>
+        <div class="sys-box">
+          <div class="sys-label">RAM</div>
+          <div class="sys-val"><span class="accent" id="sysRamPct">--</span><small> % USED</small></div>
+          <div class="bar"><i id="sysRamBar"></i></div>
+          <div class="sys-sub" id="sysRamSub">-- / -- GB</div>
+          <div class="sys-sub" id="sysSwapSub"></div>
+        </div>
+        <div class="sys-box">
+          <div class="sys-label">DISK</div>
+          <div class="sys-val"><span class="accent" id="sysDiskPct">--</span><small> % USED</small></div>
+          <div class="bar"><i id="sysDiskBar"></i></div>
+          <div class="sys-sub" id="sysDiskSub">-- / -- GB</div>
+        </div>
+      </div>
+      <div class="sys-grid" style="margin-top:14px;">
+        <div class="sys-box">
+          <div class="sys-label">GPU</div>
+          <div id="sysGpuList"><div class="sys-sub">Probing&hellip;</div></div>
+        </div>
+        <div class="sys-box">
+          <div class="sys-label">HOST</div>
+          <div class="sys-val" style="font-size:1.1rem;" id="sysHost">--</div>
+          <div class="sys-sub" id="sysHostSub">--</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span>BUILD ANYTHING <span class="accent">&mdash;</span> HOST EVERYTHING</span>
+      <span id="footAddr">ONE LINK PER PROJECT</span>
+    </footer>
+  </div>
+
+  <div class="modal-overlay" id="lockModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong id="lockTitle">LOCK PROJECT</strong>
+        <div class="modal-path" id="lockSub"></div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <div class="hint" id="lockHint" style="margin:0;"></div>
+        <input type="text" id="lockUser" placeholder="Username (optional)" maxlength="32" aria-label="Lock username" autocomplete="off" />
+        <input type="password" id="lockPass" placeholder="Lock password (required, 4+ chars)" aria-label="Lock password" autocomplete="off" />
+        <p class="status" id="lockStatus" style="margin:0; min-height:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="lockCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="lockConfirm">Lock</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="nameModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong>NAME YOUR PROJECT</strong>
+        <div class="modal-path" id="nameSub"></div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <div class="hint" style="margin:0;">Leave blank to use the zip file name.</div>
+        <input type="text" id="nameInput" placeholder="Project name" maxlength="48" aria-label="Project name" autocomplete="off" />
+        <p class="status" id="nameStatus" style="margin:0; min-height:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="nameCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="nameConfirm">Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const formStatus = document.getElementById('formStatus');
+    const dropzone = document.getElementById('dropzone');
+    const zipFile = document.getElementById('zipFile');
+    const projGrid = document.getElementById('projGrid');
+    const projCount = document.getElementById('projCount');
+    const sysStatus = document.getElementById('sysStatus');
+
+    // --- Admin session (logged-out visitors get a read-only list) ---
+    let session = { username: '', role: '' };
+    const sessionInfo = document.getElementById('sessionInfo');
+    const authBtn = document.getElementById('authBtn');
+    const loginCard = document.getElementById('loginCard');
+    const loginUser = document.getElementById('loginUser');
+    const loginPass = document.getElementById('loginPass');
+    const loginBtn = document.getElementById('loginBtn');
+    const loginStatus = document.getElementById('loginStatus');
+    const manageAdd = document.getElementById('manageAdd');
+    const isAdmin = () => session.role === 'admin';
+
+    function applyAuthUI() {
+      const admin = isAdmin();
+      if (sessionInfo) sessionInfo.textContent = admin ? ('Signed in: ' + session.username) : '';
+      if (authBtn) authBtn.textContent = admin ? 'Sign out' : 'Sign in';
+      if (manageAdd) manageAdd.style.display = admin ? '' : 'none';
+      if (!admin && loginCard) loginCard.style.display = 'none';
+    }
+
+    function authDenied() {
+      setStatus('Admin sign-in required.', false);
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // One automatic retry: tunnel/origin hiccups fail single fetches
+    // even when the server is healthy.
+    async function fetchRetry(url, opts) {
+      try {
+        return await fetch(url, opts);
+      } catch (e) {
+        await new Promise(r => setTimeout(r, 1500));
+        return await fetch(url, opts);
+      }
+    }
+
+    async function fetchProjects(quiet) {
+      if (!quiet) projGrid.innerHTML = '<p class="empty">Loading projects...</p>';
+      try {
+        const url = session.username
+          ? '/api/projects?username=' + encodeURIComponent(session.username)
+          : '/api/projects';
+        const res = await fetchRetry(url);
+        const data = await res.json();
+        // Server confirms our role; a stale session drops back to public view
+        if (data.role === 'admin' && session.username) {
+          session.role = 'admin';
+        } else {
+          session = { username: '', role: '' };
+        }
+        applyAuthUI();
+        renderProjects(data.projects || []);
+        fetchSystem();
+      } catch (e) {
+        if (sysStatus) sysStatus.textContent = 'OFFLINE — CHECK BACKEND + TUNNEL';
+        if (!quiet) projGrid.innerHTML = '<p class="empty">Error connecting to server. Check the backend + tunnel windows, then press Refresh.</p>';
+      }
+    }
+
+    // Auto-refresh statuses so the list never goes stale (quiet = no flicker).
+    // Paused while the tab is hidden to avoid tunnel spam.
+    // fetchProjects(true) already chains fetchSystem() on success,
+    // so call it alone here to avoid 2x /api/system per tick.
+    setInterval(() => { if (!document.hidden) { fetchProjects(true); } }, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { fetchProjects(true); } });
+
+    const sysCard = document.getElementById('sysCard');
+
+    function fmtGB(mb) { return (mb / 1024).toFixed(1); }
+
+    function fmtUptime(sec) {
+      sec = Math.max(0, Math.floor(sec || 0));
+      const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+      if (d) return d + 'd ' + h + 'h';
+      if (h) return h + 'h ' + m + 'm';
+      return m + 'm';
+    }
+
+    async function fetchSystem() {
+      if (!sysCard) return;
+      if (!isAdmin()) { sysCard.style.display = 'none'; return; }
+      sysCard.style.display = '';
+      try {
+        const res = await fetch('/api/system?username=' + encodeURIComponent(session.username));
+        const data = await res.json();
+        if (!data.ok || !data.system) return;
+        const s = data.system;
+        // CPU (delta since last probe; first call primes and reads N/A)
+        const cpuT = document.getElementById('sysCpuPct');
+        const cpuB = document.getElementById('sysCpuBar');
+        if (s.cpu_percent == null) {
+          cpuT.textContent = 'N/A';
+          document.getElementById('sysCpuSub').textContent = (s.cpu_count || '--') + ' cores · measuring...';
+        } else {
+          cpuT.textContent = s.cpu_percent.toFixed(1);
+          cpuB.style.width = Math.min(100, s.cpu_percent) + '%';
+          document.getElementById('sysCpuSub').textContent = (s.cpu_count || '--') + ' cores'
+            + (s.cpu_temp_c != null ? ' · ' + s.cpu_temp_c.toFixed(0) + '°C' : '');
+        }
+        document.getElementById('sysCpuCount').textContent = s.cpu_count ? ('×' + s.cpu_count) : '';
+        // Per-core mini bars (Linux; empty elsewhere)
+        const cores = document.getElementById('sysCpuCores');
+        if (cores) {
+          if (s.cpu_per_core && s.cpu_per_core.length) {
+            cores.innerHTML = s.cpu_per_core.map((v, i) =>
+              '<div style="display:flex;align-items:center;gap:6px;margin-top:4px;">' +
+              '<span class="sys-sub" style="width:26px;">C' + i + '</span>' +
+              '<div class="bar" style="flex:1;"><i style="width:' + Math.min(100, v) + '%"></i></div>' +
+              '<span class="sys-sub" style="width:38px;text-align:right;">' + Number(v).toFixed(0) + '%</span></div>'
+            ).join('');
+          } else {
+            cores.innerHTML = '';
+          }
+        }
+        // RAM: used / max + %
+        const ramT = document.getElementById('sysRamPct');
+        const ramB = document.getElementById('sysRamBar');
+        if (s.ram_percent == null) {
+          ramT.textContent = 'N/A';
+          document.getElementById('sysRamSub').textContent = 'unsupported OS';
+        } else {
+          ramT.textContent = s.ram_percent.toFixed(1);
+          ramB.style.width = Math.min(100, s.ram_percent) + '%';
+          document.getElementById('sysRamSub').textContent =
+            fmtGB(s.ram_used_mb) + ' / ' + fmtGB(s.ram_total_mb) + ' GB';
+        }
+        document.getElementById('sysSwapSub').textContent =
+          (s.swap_total_mb ? ('Swap ' + fmtGB(s.swap_used_mb) + ' / ' + fmtGB(s.swap_total_mb) + ' GB') : '');
+        // DISK (manager drive)
+        const diskT = document.getElementById('sysDiskPct');
+        const diskB = document.getElementById('sysDiskBar');
+        if (s.disk_percent == null) {
+          diskT.textContent = 'N/A';
+          document.getElementById('sysDiskSub').textContent = '-- / -- GB';
+        } else {
+          diskT.textContent = s.disk_percent.toFixed(1);
+          diskB.style.width = Math.min(100, s.disk_percent) + '%';
+          document.getElementById('sysDiskSub').textContent =
+            fmtGB(s.disk_used_mb) + ' / ' + fmtGB(s.disk_total_mb) + ' GB';
+        }
+        // GPU(s)
+        const gl = document.getElementById('sysGpuList');
+        if (!s.gpus || !s.gpus.length) {
+          gl.innerHTML = '<div class="sys-sub">No GPU detected (no nvidia-smi).</div>';
+        } else {
+          gl.innerHTML = '';
+          s.gpus.forEach(g => {
+            const row = document.createElement('div');
+            row.className = 'gpu-row';
+            const vramPct = g.mem_total_mb ? (100 * g.mem_used_mb / g.mem_total_mb) : 0;
+            row.innerHTML =
+              '<div class="gpu-name">' + esc(g.name) + '</div>' +
+              '<div class="sys-val" style="font-size:1.2rem;"><span class="accent">' + esc(Number(g.util).toFixed(0)) + '</span><small> % UTIL</small></div>' +
+              '<div class="bar"><i style="width:' + Math.min(100, g.util) + '%"></i></div>' +
+              '<div class="sys-sub">VRAM ' + esc(fmtGB(g.mem_used_mb)) + ' / ' + esc(fmtGB(g.mem_total_mb)) + ' GB · ' + esc(vramPct.toFixed(0)) + '%' +
+              (g.temp_c != null ? ' · ' + esc(Number(g.temp_c).toFixed(0)) + '°C' : '') + '</div>';
+            gl.appendChild(row);
+          });
+        }
+        // Host
+        document.getElementById('sysHost').textContent = s.platform || '--';
+        document.getElementById('sysHostSub').textContent = 'CPU ×' + (s.cpu_count || '?') +
+          (s.ram_total_mb ? (' · RAM ' + fmtGB(s.ram_total_mb) + ' GB') : '') +
+          (s.uptime_sec != null ? (' · Up ' + fmtUptime(s.uptime_sec)) : '');
+      } catch (e) { /* keep last values on tunnel hiccup */ }
+    }
+
+    function renderProjects(projects) {
+      projCount.textContent = projects.length === 1 ? '01 PROJECT' : String(projects.length).padStart(2, '0') + ' PROJECTS';
+      const up = projects.filter(p => p.status === 'online' || p.status === 'running').length;
+      if (sysStatus) {
+        sysStatus.textContent = projects.length
+          ? (up + '/' + projects.length + ' SYSTEMS OPERATIONAL')
+          : 'NO PROJECTS YET';
+      }
+      if (!projects.length) {
+        projGrid.innerHTML = '<p class="empty">No projects yet — upload one above.</p>';
+        return;
+      }
+      projGrid.innerHTML = '';
+      projects.forEach((p, i) => {
+        const card = document.createElement('div');
+        card.className = 'proj';
+        const num = String(i + 1).padStart(2, '0');
+        const state = p.status || 'offline';
+        const labels = { online: 'running', running: 'running', starting: 'starting...', stopped: 'stopped', offline: 'offline', missing: 'not found', noindex: 'empty' };
+        const typeLabel = p.type === 'static' ? 'Website' : 'App';
+        const stateLabel = labels[state] || state;
+        const dotClass = (state === 'online' || state === 'running') ? 'online' : (state === 'starting' || state === 'noindex') ? (state === 'noindex' ? 'warn' : 'starting') : (state === 'missing' || state === 'offline') ? state : '';
+        const admin = isAdmin();
+        const frozen = !!p.locked;
+        let mid = '';
+        let extra = '';
+        if (admin && !frozen) {
+          if (p.type === 'managed') {
+            mid = (state === 'running' || state === 'starting')
+              ? '<button type="button" class="btn" data-act="stop">Stop</button>'
+              : '<button type="button" class="btn" data-act="run">Run</button>';
+            mid += '<button type="button" class="btn" data-act="runner" title="Save a launcher that opens this project on any computer">Runner</button>';
+          } else if (p.type === 'static') {
+            if (p.runnable) {
+              mid += '<button type="button" class="btn" data-act="runstatic" title="Run it here">Run</button>';
+            }
+            mid += '<button type="button" class="btn" data-act="runner" title="Save a launcher that opens this project on any computer">Runner</button>';
+          }
+        }
+        let lockRow = '';
+        if (admin) {
+          if (frozen) {
+            extra += '<div class="proj-target">Locked'
+              + (p.authUser ? ' by ' + esc(p.authUser) : '')
+              + ' &middot; unlock to make changes</div>';
+            lockRow = '<div class="proj-actions"><button type="button" class="btn" data-act="unlock">Unlock</button></div>';
+          } else {
+            lockRow = '<div class="proj-actions"><button type="button" class="btn" data-act="protect">Lock</button></div>';
+          }
+        }
+        if (p.type === 'managed' && p.note) {
+          extra += '<div class="proj-target">' + esc(p.note) + '</div>';
+        }
+        card.innerHTML =
+          '<div class="proj-head">' +
+            '<span class="pnum">' + num + '</span>' +
+            '<span class="dot ' + dotClass + '" title="' + esc(stateLabel) + '"></span>' +
+            '<span class="proj-name">' + esc(p.name) + '</span>' +
+            '<span class="tag">' + esc(typeLabel) + '</span>' +
+            (p.locked ? '<span class="tag lock">Locked</span>' : '') +
+          '</div>' +
+          '<div class="dots"></div>' +
+          '<div class="proj-state">STATUS <b>' + esc(stateLabel) + '</b></div>' +
+          extra +
+          '<div class="proj-url">' + esc(location.origin + p.url) + '</div>' +
+          '<div class="proj-actions">' +
+            '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">Open</a>' +
+            mid +
+            (admin && !frozen ? '<button type="button" class="btn btn-danger">Remove</button>' : '') +
+          '</div>' +
+          lockRow;
+        const delBtn = card.querySelector('.btn-danger');
+        if (delBtn) delBtn.addEventListener('click', () => deleteProject(p.id, p.name));
+        const runBtn = card.querySelector('[data-act="run"]');
+        if (runBtn) runBtn.addEventListener('click', () => startProject(p.id, runBtn));
+        const stopBtn = card.querySelector('[data-act="stop"]');
+        if (stopBtn) stopBtn.addEventListener('click', () => stopProject(p.id, stopBtn));
+        const rsBtn = card.querySelector('[data-act="runstatic"]');
+        if (rsBtn) rsBtn.addEventListener('click', () => runStaticHere(p));
+        const protBtn = card.querySelector('[data-act="protect"]');
+        if (protBtn) protBtn.addEventListener('click', () => protectProject(p.id, p.name));
+        const unlBtn = card.querySelector('[data-act="unlock"]');
+        if (unlBtn) unlBtn.addEventListener('click', () => unlockProject(p.id, p.name));
+        const runnerBtn = card.querySelector('[data-act="runner"]');
+        if (runnerBtn) runnerBtn.addEventListener('click', () => installRunner(p.id));
+        projGrid.appendChild(card);
+      });
+    }
+
+    async function startProject(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+      setStatus('Starting... (this can take a few seconds)', true);
+      try {
+        const res = await fetch('/api/projects/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, requester: session.username })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStatus('Running.', true);
+        } else {
+          setStatus(data.error || 'Start failed.', false);
+        }
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+      } finally {
+        fetchProjects(true);
+      }
+    }
+
+    async function stopProject(id, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = 'Stopping...'; }
+      try {
+        const res = await fetch('/api/projects/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, requester: session.username })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStatus('Stopped.', true);
+        } else {
+          setStatus(data.error || 'Stop failed.', false);
+        }
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+      } finally {
+        fetchProjects(true);
+      }
+    }
+
+    async function runStaticHere(p) {
+      if (!p.runnable) return;
+      setStatus('Starting...', true);
+      try {
+        const res = await fetch('/api/projects/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: p.id, type: 'managed', cmd: p.runnable.cmd, port: p.runnable.port, requester: session.username })
+        });
+        const data = await res.json();
+        if (!data.ok) { setStatus(data.error || 'Could not start.', false); return; }
+        renderProjects(data.projects || []);
+        await startProject(p.id);
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+      }
+    }
+
+    async function installRunner(id) {
+      setStatus('Saving launcher...', true);
+      try {
+        const res = await fetch('/api/projects/runner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, requester: session.username })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStatus('Launcher saved in the project folder.', true);
+          renderProjects(data.projects || []);
+        } else {
+          setStatus(data.error || 'Could not save launcher.', false);
+        }
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+      }
+    }
+
+    async function protectProject(id, name) {
+      openLockModal(id, name, false);
+    }
+
+    async function unlockProject(id, name) {
+      openLockModal(id, name, true);
+    }
+
+    // Integrated lock/unlock dialog (no native popups): optional password
+    // on lock, password required on unlock when one was set.
+    const lockModal = document.getElementById('lockModal');
+    const lockTitle = document.getElementById('lockTitle');
+    const lockSub = document.getElementById('lockSub');
+    const lockHint = document.getElementById('lockHint');
+    const lockUser = document.getElementById('lockUser');
+    const lockPass = document.getElementById('lockPass');
+    const lockStatus = document.getElementById('lockStatus');
+    const lockConfirm = document.getElementById('lockConfirm');
+    let lockCtx = { id: '', mode: 'lock' };
+
+    // --- Upload naming: one modal per dropped zip, blank = zip file name ---
+    const nameModal = document.getElementById('nameModal');
+    const nameSub = document.getElementById('nameSub');
+    const nameInput = document.getElementById('nameInput');
+    const nameStatus = document.getElementById('nameStatus');
+    const nameConfirm = document.getElementById('nameConfirm');
+    const nameCancel = document.getElementById('nameCancel');
+    let nameQueue = [];
+
+    function zipFallbackName(file) {
+      return ((file && file.name) || 'project').replace(/\.zip$/i, '');
+    }
+
+    function askNextName() {
+      if (!nameQueue.length) {
+        setTimeout(() => fetchProjects(true), 2000);
+        return;
+      }
+      const f = nameQueue[0];
+      const rest = nameQueue.length - 1;
+      nameSub.textContent = (f.name || 'project')
+        + (rest ? '  (+' + rest + ' more after this)' : '');
+      nameInput.value = '';
+      nameStatus.textContent = '';
+      nameStatus.className = 'status';
+      nameConfirm.disabled = false;
+      nameConfirm.textContent = 'Upload';
+      nameModal.style.display = '';
+      nameInput.focus();
+    }
+
+    function closeNameModal() {
+      nameModal.style.display = 'none';
+      nameQueue = [];
+    }
+
+    async function submitNameModal() {
+      const f = nameQueue[0];
+      if (!f) { closeNameModal(); return; }
+      const name = (nameInput.value.trim() || zipFallbackName(f)).slice(0, 48);
+      if (name.length < 2) {
+        nameStatus.textContent = 'Project name must be 2+ chars (or leave blank).';
+        nameStatus.className = 'status err';
+        nameInput.focus();
+        return;
+      }
+      nameConfirm.disabled = true;
+      nameConfirm.textContent = 'Uploading...';
+      nameStatus.textContent = 'Uploading "' + name + '"...';
+      nameStatus.className = 'status';
+      try {
+        const url = '/api/upload?name=' + encodeURIComponent(name)
+          + '&requester=' + encodeURIComponent(session.username)
+          + '&type=auto';
+        const res = await fetch(url, { method: 'POST', body: f });
+        const data = await res.json();
+        if (data.ok) {
+            if (data.projects) renderProjects(data.projects);
+            setStatus('Upload complete — open it from the list below.', true);
+          } else {
+          setStatus(data.error || 'Upload failed.', false);
+          nameStatus.textContent = data.error || 'Upload failed.';
+          nameStatus.className = 'status err';
+          nameConfirm.disabled = false;
+          nameConfirm.textContent = 'Upload';
+          return;
+        }
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+        nameStatus.textContent = 'Error connecting to server.';
+        nameStatus.className = 'status err';
+        nameConfirm.disabled = false;
+        nameConfirm.textContent = 'Upload';
+        return;
+      }
+      nameQueue.shift();
+      if (nameQueue.length) {
+        askNextName();
+      } else {
+        nameModal.style.display = 'none';
+        setTimeout(() => fetchProjects(true), 2000);
+      }
+    }
+
+    function openLockModal(id, name, unlock) {
+      lockCtx = { id, mode: unlock ? 'unlock' : 'lock' };
+      lockTitle.textContent = unlock ? 'UNLOCK PROJECT' : 'LOCK PROJECT';
+      lockSub.textContent = name;
+      lockUser.value = '';
+      lockPass.value = '';
+      lockStatus.textContent = '';
+      lockStatus.className = 'status';
+      // Username only matters when locking (saved with the credentials);
+      // unlocking always asks just the lock password.
+      lockUser.style.display = unlock ? 'none' : '';
+      lockPass.placeholder = unlock ? 'Enter lock password' : 'Lock password (required, 4+ chars)';
+      if (unlock) {
+        lockHint.innerHTML = 'Enter the lock password to unlock.';
+        lockConfirm.textContent = 'Unlock';
+      } else {
+        lockHint.innerHTML = 'Lock hides the Run, Stop and Remove buttons until you unlock with the password.';
+        lockConfirm.textContent = 'Lock';
+      }
+      lockModal.style.display = '';
+      (unlock ? lockPass : lockUser).focus();
+    }
+
+    function closeLockModal() { lockModal.style.display = 'none'; }
+
+    async function submitLockModal() {
+      const pw = lockPass.value;
+      const uname = lockUser.value.trim();
+      if (lockCtx.mode === 'lock' && pw.length < 4) {
+        lockStatus.textContent = 'Password required (4+ chars).';
+        lockStatus.className = 'status err';
+        lockPass.focus();
+        return;
+      }
+      lockConfirm.disabled = true;
+      lockStatus.textContent = lockCtx.mode === 'unlock' ? 'Unlocking...' : 'Locking...';
+      lockStatus.className = 'status';
+      try {
+        const url = lockCtx.mode === 'unlock' ? '/api/projects/auth/clear' : '/api/projects/auth';
+        const payload = { requester: session.username, id: lockCtx.id, password: pw };
+        if (lockCtx.mode === 'lock' && uname) payload.username = uname;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.ok) {
+          closeLockModal();
+          setStatus(lockCtx.mode === 'unlock' ? 'Unlocked.' : 'Locked.', true);
+          renderProjects(data.projects || []);
+        } else {
+          lockStatus.textContent = data.error || 'Failed.';
+          lockStatus.className = 'status err';
+        }
+      } catch (e) {
+        lockStatus.textContent = 'Error connecting to server.';
+        lockStatus.className = 'status err';
+      } finally {
+        lockConfirm.disabled = false;
+      }
+    }
+
+    async function deleteProject(id, name) {
+      if (!confirm('Remove "' + name + '" from the dashboard? Its files stay on the server.')) return;
+      try {
+        const res = await fetch('/api/projects/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, requester: session.username })
+        });
+        const data = await res.json();
+        if (data.ok) renderProjects(data.projects || []);
+        else setStatus(data.error || 'Failed to remove.', false);
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+      }
+    }
+
+    function setStatus(msg, ok) {
+      formStatus.textContent = msg;
+      formStatus.className = 'status ' + (ok ? 'ok' : 'err');
+    }
+
+    async function login() {
+      const username = loginUser.value.trim();
+      const password = loginPass.value;
+      if (!username || !password) {
+        loginStatus.textContent = 'Enter username and password.';
+        loginStatus.className = 'status err';
+        return;
+      }
+      loginBtn.disabled = true;
+      // Visible elapsed timer - no silent waits; fail fast on error.
+      const t0 = Date.now();
+      loginStatus.textContent = 'Signing in... 0s';
+      loginStatus.className = 'status';
+      const tick = setInterval(() => {
+        loginStatus.textContent = 'Signing in... ' + Math.floor((Date.now() - t0) / 1000) + 's';
+      }, 500);
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          session = { username: data.username || username, role: data.role || 'admin' };
+          loginUser.value = '';
+          loginPass.value = '';
+          loginStatus.textContent = '';
+          loginCard.style.display = 'none';
+          await fetchProjects();
+        } else {
+          loginStatus.textContent = data.error || 'Sign in failed.';
+          loginStatus.className = 'status err';
+        }
+      } catch (e) {
+        loginStatus.textContent = 'Error connecting to server.';
+        loginStatus.className = 'status err';
+      } finally {
+        clearInterval(tick);
+        loginBtn.disabled = false;
+      }
+    }
+
+    function logout() {
+      session = { username: '', role: '' };
+      loginStatus.textContent = '';
+      fetchProjects();
+    }
+
+    // --- Drag & drop upload (Drive-style): click opens picker, or drop .zips ---
+    // Each zip gets a naming modal; blank input falls back to the zip file name.
+    function queueUploads(fileList) {
+      const zips = Array.from(fileList || []).filter(f => /\.zip$/i.test(f.name || ''));
+      if (!zips.length) { setStatus('Drop a .zip file (or click to choose one).', false); return; }
+      nameQueue = zips;
+      askNextName();
+    }
+
+    if (dropzone && zipFile) {
+      dropzone.addEventListener('click', () => zipFile.click());
+      dropzone.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); zipFile.click(); }
+      });
+      zipFile.addEventListener('change', () => {
+        if (zipFile.files && zipFile.files.length) queueUploads(zipFile.files);
+        zipFile.value = '';
+      });
+      ['dragenter', 'dragover'].forEach(ev => dropzone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropzone.classList.add('drag');
+      }));
+      ['dragleave', 'drop'].forEach(ev => dropzone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropzone.classList.remove('drag');
+      }));
+      dropzone.addEventListener('drop', e => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+          queueUploads(e.dataTransfer.files);
+        }
+      });
+    }
+    document.getElementById('nameCancel').addEventListener('click', closeNameModal);
+    nameConfirm.addEventListener('click', submitNameModal);
+    nameModal.addEventListener('click', e => { if (e.target === nameModal) closeNameModal(); });
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitNameModal(); if (e.key === 'Escape') closeNameModal(); });
+
+    document.getElementById('refreshBtn').addEventListener('click', () => fetchProjects());
+    document.getElementById('lockCancel').addEventListener('click', closeLockModal);
+    lockConfirm.addEventListener('click', submitLockModal);
+    lockModal.addEventListener('click', e => { if (e.target === lockModal) closeLockModal(); });
+    lockPass.addEventListener('keydown', e => { if (e.key === 'Enter') submitLockModal(); if (e.key === 'Escape') closeLockModal(); });
+    lockUser.addEventListener('keydown', e => { if (e.key === 'Enter') submitLockModal(); if (e.key === 'Escape') closeLockModal(); });
+    loginBtn.addEventListener('click', login);
+    loginPass.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+    loginUser.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+    function openLogin() {
+      loginCard.style.display = '';
+      loginCard.classList.remove('drop-in');
+      void loginCard.offsetWidth; // restart the animation
+      loginCard.classList.add('drop-in');
+      loginUser.focus();
+    }
+    authBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isAdmin()) { logout(); return; }
+      if (loginCard.style.display === 'none') openLogin();
+      else loginCard.style.display = 'none';
+    });
+    // Dropdown closes on outside click or Escape - typed text is kept,
+    // only cleared after a successful sign-in.
+    document.addEventListener('click', (e) => {
+      if (loginCard.style.display !== 'none'
+          && !loginCard.contains(e.target) && !authBtn.contains(e.target)) {
+        loginCard.style.display = 'none';
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && loginCard.style.display !== 'none') loginCard.style.display = 'none';
+    });
+    fetchProjects();
+  </script>
+</body>
+</html>

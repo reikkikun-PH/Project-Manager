@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<!-- UniEvent - Campus Event Reservation System | Simplified Prototype
+     HOW TO USE: Just double-click index.html (works offline, no server needed)
+     STRUCTURE: css/style.css = all styles | js/app.js = all logic + data
+     DATA: Saved in browser localStorage - click Reset Demo Data to restore -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniEvent — Campus Event Reservation System | Prototype</title>
+<meta name="description" content="Portable prototype of UniEvent - Campus Event Reservation System">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="login-wrap">
+  <div class="login-card">
+    <div class="login-hero">
+      <div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div style="width:36px;height:36px;background:#18181b;color:#fff;display:grid;place-items:center;border-radius:8px;font-weight:700;font-size:13px">UE</div>
+          <div>
+            <div style="font-weight:700;font-size:16px;line-height:1">UniEvent</div>
+            <div style="font-size:11px;color:#71717a;letter-spacing:.4px;text-transform:uppercase;margin-top:2px">Campus Event Reservation</div>
+          </div>
+        </div>
+        <h2 style="margin:18px 0 8px;font-size:24px;line-height:1.2;letter-spacing:-.4px;font-weight:700">Book venues in minutes.</h2>
+        <p style="margin:0;color:#52525b;font-size:13.5px;line-height:1.6">Simple booking, approvals, and availability — all in one place. Runs offline, no setup needed.</p>
+        <div class="hero-list">
+          <div class="hero-item">Calendar with automatic conflict detection</div>
+          <div class="hero-item">Approvals and notifications by role</div>
+          <div class="hero-item">Reports with CSV / PDF export</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#a1a1aa;margin-top:16px">Prototype v1.0 — data stays in this browser.</div>
+    </div>
+    <div style="padding:18px">
+      <h3 style="margin:4px 0">Sign in</h3>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:12px">Choose a demo account — password is optional for prototype.</p>
+      <div class="grid" style="gap:10px">
+        <label>Role
+          <select id="loginRole" class="select">
+            <option value="organizer">Event Organizer (Student/Faculty)</option>
+            <option value="approver">Facility Approver</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </label>
+        <label>Email
+          <input id="loginEmail" class="input" placeholder="e.g. organizer@university.edu" value="organizer@university.edu">
+        </label>
+        <label>Password <span style="font-weight:400;color:var(--muted)">(any value)</span>
+          <input id="loginPass" type="password" class="input" placeholder="••••••••" value="demo123">
+        </label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button class="btn small" type="button" onclick="fillDemo('organizer')">Use Organizer</button>
+          <button class="btn small" type="button" onclick="fillDemo('approver')">Use Approver</button>
+          <button class="btn small" type="button" onclick="fillDemo('admin')">Use Admin</button>
+          <button class="btn small" type="button" onclick="resetData()">Reset Demo Data</button>
+        </div>
+        <button class="btn primary" onclick="login()">Sign in →</button>
+        <div style="font-size:11px;color:var(--muted);line-height:1.5">
+          <b>Demo accounts (see <code>data/accounts.json</code>):</b><br>
+          organizer@university.edu / <code>organizer123</code> • approver@university.edu / <code>approver123</code> • admin@university.edu / <code>admin123</code><br>
+          Click <b>Use Organizer/Approver/Admin</b> to auto-fill email + password. Edit <code>data/accounts.json</code> to add more.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appView" style="display:none">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">UE</div>
+      <div>
+        UniEvent
+        <small>CAMPUS RESERVATION SYSTEM • PORTABLE PROTOTYPE</small>
+      </div>
+      <span id="roleBadge" class="role-badge">Organizer</span>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" onclick="navigate('notifications')" title="Notifications">○ <span id="notifDot" class="dot" style="display:none">0</span></button>
+      <div class="user-chip">
+        <img src="https://i.pravatar.cc/100?img=12" alt="avatar">
+        <div>
+          <b id="userName">Alex Rivera</b><br><span id="userEmail">organizer@university.edu</span>
+        </div>
+      </div>
+      <button class="btn small" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav class="sidenav">
+      <h4>Main</h4>
+      <div class="nav-item active" data-view="dashboard" onclick="navigate('dashboard')"><span class="ico">—</span> Dashboard</div>
+      <div class="nav-item" data-view="catalog" onclick="navigate('catalog')"><span class="ico">—</span> Venues</div>
+      <div class="nav-item" data-view="booking" onclick="navigate('booking')"><span class="ico">—</span> New Booking</div>
+      <div class="nav-item" data-view="mybookings" onclick="navigate('mybookings')"><span class="ico">—</span> My Bookings</div>
+
+      <h4>Workspace</h4>
+      <div class="nav-item" data-view="approvals" onclick="navigate('approvals')"><span class="ico">—</span> Approvals</div>
+      <div class="nav-item" data-view="notifications" onclick="navigate('notifications')"><span class="ico">—</span> Notifications</div>
+
+      <h4>Admin</h4>
+      <div class="nav-item" data-view="reports" onclick="navigate('reports')"><span class="ico">—</span> Reports</div>
+      <div class="nav-item" data-view="settings" onclick="navigate('settings')"><span class="ico">—</span> Settings</div>
+
+      <div class="sep"></div>
+      <div style="font-size:11px;line-height:1.6;color:#a1a1aa;padding:0 8px">
+        Offline prototype.<br>Data saved locally.
+      </div>
+    </nav>
+
+    <main class="content">
+
+      <!-- DASHBOARD — Minimal, high-visibility -->
+      <section id="view-dashboard" class="view active">
+        <!-- Greeting + primary action -->
+        <div class="dash-hero">
+          <div>
+            <h2 style="margin:0;font-size:22px;letter-spacing:-.3px">Good day, <span id="dashGreet">—</span></h2>
+            <p style="margin:6px 0 0;font-size:13px;line-height:1.5"><span id="dashDate">—</span></p>
+          </div>
+          <div class="dash-actions">
+            <button class="btn primary" onclick="navigate('booking')">New booking</button>
+            <button class="btn" onclick="navigate('catalog')">Browse venues</button>
+          </div>
+        </div>
+
+        <div id="roleHint" class="role-hint" style="display:none"></div>
+
+        <!-- KPIs — minimal, breathing space -->
+        <div class="dash-kpis">
+          <div class="card dash-kpi"><div class="kpi-icon">T</div><div><span class="label">Total bookings</span><span id="kpiTotal" class="value">—</span><span class="sub">All time</span></div></div>
+          <div class="card dash-kpi accent"><div class="kpi-icon">P</div><div><span class="label">Needs approval</span><span id="kpiPending" class="value">—</span><span class="sub">Pending review</span></div></div>
+          <div class="card dash-kpi"><div class="kpi-icon">U</div><div><span class="label">Utilization</span><span id="kpiUtil" class="value">—</span><span class="sub">This month</span></div></div>
+          <div class="card dash-kpi"><div class="kpi-icon">C</div><div><span class="label">Conflicts blocked</span><span id="kpiConflicts" class="value">—</span><span class="sub">Prevented</span></div></div>
+        </div>
+
+        <!-- Quick navigate -->
+        <div class="dash-quick">
+          <button class="quick-card" onclick="navigate('booking')"><span class="qc-icon">1</span><span class="qc-text"><b>Book a venue</b><small>Check conflicts automatically</small></span><span class="qc-arrow">→</span></button>
+          <button class="quick-card" onclick="navigate('mybookings')"><span class="qc-icon">2</span><span class="qc-text"><b>My bookings</b><small id="qcMyCount">— requests</small></span><span class="qc-arrow">→</span></button>
+          <button class="quick-card" onclick="navigate('approvals')"><span class="qc-icon">3</span><span class="qc-text"><b>Approvals</b><small id="qcPending">— pending</small></span><span class="qc-arrow">→</span></button>
+        </div>
+
+        <div class="dash-grid">
+          <div class="card card-pad dash-panel">
+            <div class="dash-panel-head">
+              <h3 style="margin:0;font-size:14px;font-weight:600">Upcoming</h3>
+              <span class="badge">Next 7 days</span>
+            </div>
+            <div style="margin-top:12px;overflow:auto">
+              <table class="table table-minimal" id="upcomingTable"></table>
+            </div>
+            <button class="btn small" style="margin-top:12px;width:100%;border-style:dashed" onclick="navigate('mybookings')">View all bookings</button>
+          </div>
+          <div class="card card-pad dash-panel">
+            <div class="dash-panel-head">
+              <h3 style="margin:0;font-size:14px;font-weight:600">Demand by venue</h3>
+              <span style="font-size:11px;color:var(--muted)">Bookings</span>
+            </div>
+            <div id="utilBars" class="chart-bars" style="margin-top:6px"></div>
+            <div class="chart-note">Ranked by booking count. Full breakdown in Reports.</div>
+            <div class="dash-foot">
+              <span style="font-size:12px;color:var(--muted)">Need data export?</span>
+              <span style="display:flex;gap:8px"><button class="btn small" onclick="exportCSV()">CSV</button><button class="btn small" onclick="exportPDF()">PDF</button></span>
+            </div>
+          </div>
+        </div>
+
+        <details class="dash-help">
+          <summary>How it works</summary>
+          <div class="help-grid">
+            <div><b>1. Book</b><span>Choose venue and time. Overlaps are blocked.</span></div>
+            <div><b>2. Review</b><span>Approver confirms, rejects, or requests changes.</span></div>
+            <div><b>3. Notify</b><span>Updates appear in Notifications and My Bookings.</span></div>
+          </div>
+        </details>
+      </section>
+
+      <!-- CATALOG -->
+      <section id="view-catalog" class="view">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+          <div><h2>Venues</h2><p style="margin:4px 0 0;font-size:13px">Capacity, amenities, and availability.</p></div>
+          <div class="filters">
+            <input id="catalogSearch" class="input" placeholder="Search venues..." style="width:220px" oninput="renderCatalog()">
+            <select id="catalogCap" class="select" style="width:160px" onchange="renderCatalog()">
+              <option value="">Any capacity</option>
+              <option value="100">100+ seats</option>
+              <option value="300">300+ seats</option>
+              <option value="500">500+ seats</option>
+            </select>
+          </div>
+        </div>
+        <div id="catalogGrid" class="grid grid-3" style="margin-top:14px"></div>
+      </section>
+
+      <!-- BOOKING — familiar single form -->
+      <section id="view-booking" class="view">
+        <div class="booking-header">
+          <div>
+            <h2 style="font-size:20px">New booking</h2>
+            <p style="margin:6px 0 0;font-size:13px;line-height:1.5">Fill in the details below — availability updates as you type.</p>
+          </div>
+          <button class="btn small" onclick="resetBookingForm()">Clear form</button>
+        </div>
+
+        <div class="booking-layout">
+          <!-- LEFT: single familiar form -->
+          <div class="card booking-form-card">
+            <!-- 1 Venue -->
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-section-num">1</span><div><b>Venue</b><small>Where is your event?</small></div></div>
+              <label>Venue
+                <select id="bkVenue" class="select input-lg"></select>
+              </label>
+              <div id="bkVenueCards" class="venue-picker" style="margin-top:10px"></div>
+              <div id="bkVenueHint" class="hint-box" style="display:none"></div>
+              <div id="wizMsg1" class="wiz-msg" style="display:none"></div>
+            </div>
+
+            <!-- 2 Date & time -->
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-section-num">2</span><div><b>Date and time</b><small>Pick a date, then a time slot</small></div></div>
+              <div class="grid grid-2" style="gap:12px">
+                <label>Date
+                  <input id="bkDate" type="date" class="input input-lg">
+                  <div class="quick-dates"><button type="button" class="chip" onclick="pickDate(new Date().toISOString().slice(0,10))">Today</button><button type="button" class="chip" onclick="pickDate(new Date(Date.now()+86400000).toISOString().slice(0,10))">Tomorrow</button><button type="button" class="chip" onclick="pickDate(new Date(Date.now()+2*86400000).toISOString().slice(0,10))">Day after</button></div>
+                </label>
+                <label>Attendees
+                  <input id="bkAttendees" type="number" min="1" class="input input-lg" placeholder="e.g. 80">
+                  <span class="label-hint" id="capHint">Capacity check is automatic</span>
+                </label>
+              </div>
+              <div class="grid grid-2" style="gap:12px;margin-top:10px">
+                <label>Start <input id="bkStart" type="time" class="input input-lg" value="09:00"></label>
+                <label>End <input id="bkEnd" type="time" class="input input-lg" value="11:00"></label>
+              </div>
+              <div class="duration-row" aria-label="Quick duration">
+                <button type="button" class="duration-chip" onclick="setDuration(1,this)">1 hour</button>
+                <button type="button" class="duration-chip" onclick="setDuration(2,this)">2 hours</button>
+                <button type="button" class="duration-chip" onclick="setDuration(3,this)">3 hours</button>
+                <button type="button" class="duration-chip" onclick="setDuration(4,this)">Half day</button>
+              </div>
+              <div id="availLine" class="avail-line idle">Select a venue and date to check availability.</div>
+              <div id="wizMsg2" class="wiz-msg" style="display:none"></div>
+            </div>
+
+            <!-- 3 Details -->
+            <div class="form-section">
+              <div class="form-section-title"><span class="form-section-num">3</span><div><b>Event details</b><small>What should approvers know?</small></div></div>
+              <label>Event title <span class="label-req">required</span>
+                <input id="bkTitle" class="input input-lg" placeholder="e.g. Freshmen Welcome Party">
+              </label>
+              <div class="grid grid-2" style="gap:12px;margin-top:10px">
+                <label>Organization
+                  <input id="bkOrg" class="input" placeholder="e.g. CS Society">
+                </label>
+                <label>Contact / notes
+                  <input id="bkNotes" class="input" placeholder="e.g. Need early setup at 8am">
+                </label>
+              </div>
+              <div style="margin-top:12px">
+                <label style="margin-bottom:8px">Equipment needed <span class="label-hint">optional</span></label>
+                <div class="resource-chips">
+                  <label class="r-chip"><input type="checkbox" value="Projector" class="bkRes" hidden> Projector</label>
+                  <label class="r-chip"><input type="checkbox" value="Sound System" class="bkRes" hidden> Sound</label>
+                  <label class="r-chip"><input type="checkbox" value="Microphones" class="bkRes" hidden> Mics</label>
+                  <label class="r-chip"><input type="checkbox" value="Seating" class="bkRes" hidden> Seating</label>
+                  <label class="r-chip"><input type="checkbox" value="Stage" class="bkRes" hidden> Stage</label>
+                  <label class="r-chip"><input type="checkbox" value="Aircon" class="bkRes" hidden> Aircon</label>
+                </div>
+              </div>
+              <div id="wizMsg3" class="wiz-msg" style="display:none"></div>
+              <div id="wizardReview" class="review-box" style="display:none"></div>
+            </div>
+
+            <div id="conflictMsg" class="msg-card" style="display:none;margin:0 20px"></div>
+
+            <!-- Submit -->
+            <div class="wizard-nav">
+              <div style="font-size:12px;color:var(--muted)">No payment needed. You will be notified on approval.</div>
+              <div style="flex:1"></div>
+              <button class="btn primary" onclick="createBooking()" style="min-width:180px">Request booking</button>
+            </div>
+            <!-- hidden compat nodes for old wizard logic -->
+            <div class="wizard-progress" aria-hidden="true"><div class="wiz-step" data-wiz="1"></div><div class="wiz-line"></div><div class="wiz-step" data-wiz="2"></div><div class="wiz-line"></div><div class="wiz-step" data-wiz="3"></div></div>
+            <div class="progress-bar" aria-hidden="true"><div id="progressFill" class="progress-fill" style="width:100%"></div></div>
+            <div style="display:none"><div class="wizard-step active" data-step="1"></div><div class="wizard-step active" data-step="2"></div><div class="wizard-step active" data-step="3"></div><button id="wizBack"></button><button id="wizNext"></button><button id="wizSubmit"></button></div>
+          </div>
+
+          <!-- RIGHT: sticky summary + calendar -->
+          <div class="summary-side">
+            <div class="calendar calendar-minimal">
+              <div class="cal-head">
+                <button class="cal-nav" onclick="calShift(-1)" aria-label="Previous month">‹</button>
+                <b id="calTitle" style="font-size:14px">—</b>
+                <button class="cal-nav" onclick="calShift(1)" aria-label="Next month">›</button>
+              </div>
+              <div class="cal-weekdays"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>
+              <div id="calGrid" class="cal-grid"></div>
+              <div class="cal-legend"><span><i class="dot-legend approved"></i> Booked</span><span><i class="dot-legend today"></i> Today</span></div>
+            </div>
+
+            <div id="bookingPreview" class="card card-pad preview-card">
+              <h4 style="margin:0 0 4px;font-size:13px;font-weight:600">Booking summary</h4>
+              <div id="previewBody" style="font-size:13px;color:var(--muted);line-height:1.6">Choose a venue and date to see a summary here.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MY BOOKINGS -->
+      <section id="view-mybookings" class="view">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <h2>My Bookings</h2>
+          <div class="filters">
+            <select id="myFilter" class="select" style="width:160px" onchange="renderMyBookings()"><option value="">All statuses</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Revision</option></select>
+            <button class="btn" onclick="navigate('booking')">New</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="myTable"></table>
+        </div>
+      </section>
+
+      <!-- APPROVALS -->
+      <section id="view-approvals" class="view">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div><h2>Approvals</h2><p style="margin:4px 0 0;font-size:13px">Review and decide on pending requests.</p></div>
+          <span id="approverLock" class="badge" style="display:none">Read-only for Organizer</span>
+        </div>
+        <div id="approvalCounts" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+        <div class="card card-pad" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="approvalSearch" class="input" placeholder="Search title, venue, requester..." style="flex:1;min-width:180px" oninput="renderApprovals()">
+          <select id="approvalFilter" class="select" style="width:160px" onchange="renderApprovals()">
+            <option value="">All statuses</option>
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Revision">Revision</option>
+          </select>
+          <button class="btn small" onclick="document.getElementById('approvalSearch').value='';document.getElementById('approvalFilter').value='';renderApprovals()">Clear</button>
+        </div>
+        <div style="margin-top:12px;overflow:auto">
+          <table class="table" id="approvalTable"></table>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Tip: Approving checks for conflicts with already-Approved bookings — double-bookings are blocked. Reject/Revision will prompt for a reason.</div>
+      </section>
+
+      <!-- NOTIFICATIONS -->
+      <section id="view-notifications" class="view">
+        <h2>Notifications</h2>
+        <p style="margin:4px 0 12px;font-size:13px">Status updates for your bookings.</p>
+        <div id="notifList" class="grid" style="gap:10px"></div>
+      </section>
+
+      <!-- REPORTS -->
+      <section id="view-reports" class="view">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <h2>Reports</h2>
+          <div class="filters">
+            <button class="btn" onclick="exportCSV()">Download CSV</button>
+            <button class="btn primary" onclick="exportPDF()">Download PDF</button>
+          </div>
+        </div>
+        <div class="grid grid-3" style="margin-top:14px">
+          <div class="card card-pad kpi"><span class="label">Peak booking hour</span><span id="rPeak" class="value">—</span><span class="sub">Most requested start time</span></div>
+          <div class="card card-pad kpi"><span class="label">Busiest venue</span><span id="rBusiest" class="value" style="font-size:18px">—</span><span class="sub" id="rBusiestSub">—</span></div>
+          <div class="card card-pad kpi"><span class="label">Approval rate</span><span id="rApproval" class="value">—</span><span class="sub">Approved / total</span></div>
+        </div>
+        <div class="card card-pad" style="margin-top:14px">
+          <h3 style="margin:0;font-size:14px;font-weight:600">Bookings per venue</h3>
+          <div id="reportBars" class="chart-bars"></div>
+          <div style="margin-top:20px;overflow:auto"><table class="table" id="reportTable"></table></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="view-settings" class="view">
+        <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+          <div>
+            <h2>Settings</h2>
+            <p style="margin:4px 0 0;font-size:13px">Manage venues, accounts, and organization.</p>
+          </div>
+          <span class="badge" id="adminPanelBadge">Admin</span>
+        </div>
+
+        <!-- Venue Management -->
+        <div class="card card-pad" style="margin-top:14px">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+            <h3 style="margin:0;font-size:14px;font-weight:600">Venues</h3>
+            <span style="font-size:11px;color:var(--muted)">Cover images appear in the venue list.</span>
+          </div>
+          <div class="grid" style="gap:12px;margin-top:12px">
+            <input type="hidden" id="venueEditId" value="">
+            <div class="grid grid-2">
+              <label>Name <input id="fName" class="input" placeholder="e.g. Computer Lab"></label>
+              <label>Location <input id="fLoc" class="input" placeholder="e.g. IT Building 2F"></label>
+            </div>
+            <div class="grid grid-2">
+              <label>Capacity <input id="fCap" type="number" class="input" placeholder="60"></label>
+              <label>Amenities (comma separated) <input id="fAmen" class="input" placeholder="Projector, Aircon"></label>
+            </div>
+            <div class="grid grid-2">
+              <label>Cover image — Upload <input id="fImageFile" type="file" accept="image/*" class="input" style="padding:6px"></label>
+              <label>Or image URL <input id="fImageUrl" type="url" class="input" placeholder="https://.../photo.jpg" oninput="previewVenueImage(this.value)"></label>
+            </div>
+            <div id="fImagePreview" style="display:none;border:1px dashed var(--border);border-radius:12px;overflow:hidden;height:140px;background:#fafafa;position:relative">
+              <img id="fImagePreviewImg" style="width:100%;height:100%;object-fit:cover;display:none" alt="preview">
+              <div id="fImagePreviewPh" style="display:grid;place-items:center;height:100%;color:var(--muted);font-size:12px">No image — plain placeholder will be used</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn primary" onclick="addVenue()" id="venueSubmitBtn">Add venue</button>
+              <button class="btn" onclick="cancelEditVenue()" id="venueCancelBtn" style="display:none">Cancel</button>
+            </div>
+          </div>
+          <div class="sep"></div>
+          <div id="venueList" class="grid" style="gap:10px"></div>
+        </div>
+
+        <!-- Account Creation & Role Management -->
+        <div class="grid grid-2" style="margin-top:14px">
+          <div class="card card-pad">
+            <h3 style="margin:0 0 4px;font-size:14px;font-weight:600">Create account</h3>
+            <p style="margin:0 0 12px;font-size:12px">Create Organizer, Approver, or Admin accounts.</p>
+            <div class="grid" style="gap:10px">
+              <div class="grid grid-2">
+                <label>Full name <input id="accName" class="input" placeholder="e.g. Juan Dela Cruz"></label>
+                <label>Role <select id="accRole" class="select"><option value="organizer">Organizer</option><option value="approver">Approver</option><option value="admin">Admin</option></select></label>
+              </div>
+              <label>Email <input id="accEmail" type="email" class="input" placeholder="e.g. juan@university.edu"></label>
+              <label>Password <input id="accPass" type="text" class="input" placeholder="e.g. temp123"></label>
+              <div class="grid grid-2">
+                <label>Organization <input id="accOrg" class="input" placeholder="e.g. CS Society"></label>
+                <label>Department <input id="accDept" class="input" placeholder="e.g. College of Science"></label>
+              </div>
+              <label>Avatar URL (optional) <input id="accAvatar" class="input" placeholder="https://..."></label>
+              <button class="btn primary" onclick="addAccount()">Create account</button>
+              <div id="accMsg" style="display:none;padding:8px 10px;border-radius:8px;font-size:12px"></div>
+            </div>
+          </div>
+          <div class="card card-pad">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+              <h3 style="margin:0;font-size:14px;font-weight:600">Users</h3>
+              <span class="badge" id="userCountBadge">— users</span>
+            </div>
+            <p style="margin:4px 0 10px;font-size:12px">Change roles or remove accounts.</p>
+            <div style="overflow:auto;max-height:320px"><table class="table" id="userTable"></table></div>
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn small" onclick="exportAccounts()">Export JSON</button>
+              <label class="btn small" style="cursor:pointer">Import JSON <input id="importAccountsFile" type="file" accept=".json" hidden onchange="importAccounts(event)"></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Organization & Danger Zone -->
+        <div class="grid grid-2" style="margin-top:14px">
+          <div class="card card-pad">
+            <h3 style="margin:0 0 10px;font-size:14px;font-weight:600">Organization</h3>
+            <div class="grid" style="gap:8px">
+              <label>Organization <input id="orgName" class="input" value="Computer Science Society"></label>
+              <label>Adviser <input id="orgAdviser" class="input" value="Prof. Dela Cruz"></label>
+              <label>Members <input id="orgMembers" type="number" class="input" value="45"></label>
+              <button class="btn" onclick="saveOrg()">Save organization</button>
+            </div>
+          </div>
+          <div class="card card-pad">
+            <h3 style="margin:0;font-size:14px;font-weight:600">Danger zone</h3>
+            <p style="margin:6px 0 12px;font-size:12px">Destructive admin actions.</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" onclick="resetData()">Reset demo data</button>
+              <button class="btn" style="background:#fef2f2;border-color:#fecaca;color:#991b1b" onclick="clearAllBookings()">Clear all bookings</button>
+              <button class="btn" style="background:#fef2f2;border-color:#fecaca;color:#991b1b" onclick="clearAllAccounts()">Clear non-admin accounts</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div style="margin:18px 0 8px;color:var(--muted);font-size:11px;text-align:center">UniEvent • Prototype v1.0 • Offline</div>
+    </main>
+  </div>
+</div>
+
+<!-- Booking Details Modal -->
+<div id="bookingModal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this) closeBookingModal()">
+  <div style="background:#fff;max-width:640px;width:100%;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-height:90vh;overflow:auto">
+    <div id="bookingModalBody" style="padding:18px"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
+

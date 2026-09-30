@@ -1,0 +1,6 @@
+# Pinned for Python 3.11 64-bit (tested with Python 3.11.9)
+# Core for server.py face verification
+opencv-python==5.0.0.93
+numpy==2.3.5
+# Used by host.bat health checks (optional but bundled)
+requests==2.34.2

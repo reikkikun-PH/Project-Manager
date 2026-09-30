@@ -1,0 +1,14 @@
+# Portable - keep libs vendored for copy-anywhere, but ignore runtime junk
+__pycache__/
+*.pyc
+logs/*.jpg
+logs/*.jpeg
+logs/*.png
+server-out.log
+server-err.log
+cftunnel-out.log
+cftunnel-err.log
+# Keep libs/ committed for portability - uncomment to ignore
+# libs/
+venv/
+python/
