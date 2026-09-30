@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Create account — BaonCheck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-mark">
+      <div class="mark-icon">B</div>
+      <div class="mark-text">BaonCheck</div>
+    </div>
+
+    <h1>Create your account</h1>
+    <p class="auth-sub">Set up BaonCheck in under a minute.</p>
+
+    <div id="registerError" class="auth-error hidden"></div>
+
+    <form id="registerForm" novalidate>
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" name="name" placeholder="Juan Dela Cruz" required />
+      </div>
+      <div class="field">
+        <label for="school">School</label>
+        <input type="text" id="school" name="school" placeholder="Your school or university" />
+      </div>
+      <div class="field">
+        <label for="email">Gmail address</label>
+        <input type="email" id="email" name="email" placeholder="you@gmail.com" pattern="^[a-zA-Z0-9._%+-]+@gmail\.com$" required />
+        <div class="field-hint">Sign up with your Gmail address (must end in @gmail.com).</div>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="At least 6 characters" required minlength="6" />
+      </div>
+      <div class="field">
+        <label for="confirmPassword">Confirm password</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" placeholder="Re-enter password" required minlength="6" />
+      </div>
+      <button type="submit" class="btn btn-primary">Create account</button>
+    </form>
+
+    <div class="auth-foot">
+      Already have an account? <a href="index.html">Log in</a>
+    </div>
+  </div>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>

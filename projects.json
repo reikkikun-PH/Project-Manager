@@ -1,0 +1,29 @@
+[
+  {
+    "id": "unievent",
+    "name": "UniEvent",
+    "type": "static",
+    "target": "./Project List/unievent/prototype",
+    "cmd": "",
+    "port": "",
+    "runnerPort": ""
+  },
+  {
+    "id": "verifid",
+    "name": "VerifID",
+    "type": "managed",
+    "target": "./Project List/verifid",
+    "cmd": "python server.py",
+    "port": "8100",
+    "runnerPort": "8100"
+  },
+  {
+    "id": "baoncheck",
+    "name": "BaonCheck",
+    "type": "static",
+    "target": "./Project List/baoncheck",
+    "cmd": "",
+    "port": "",
+    "runnerPort": "8100"
+  }
+]

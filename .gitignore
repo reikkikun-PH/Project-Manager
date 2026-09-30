@@ -1,0 +1,28 @@
+# Secrets - never commit real credentials (see credentials.example.json)
+credentials.json
+project_auth.json
+**/credentials.json
+
+# Runtime logs / tunnel state
+server-out.log
+server-err.log
+tunnel.log
+tunnel-url.txt
+runner-out.log
+runner-err.log
+*.log
+logs8101.json
+
+# Cloudflared binaries (~90MB) - download per read.md, not stored in git
+cloudflared
+cloudflared.exe
+
+# Large models + private data (re-download / re-add locally)
+*.onnx
+Project List/verifid/employee data/
+Project List/verifid/logs/
+
+# Python
+__pycache__/
+*.pyc
+venv/

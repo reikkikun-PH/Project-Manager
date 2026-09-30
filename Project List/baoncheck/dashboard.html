@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard — BaonCheck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-mark">
+      <div class="mark-icon">B</div>
+      <div class="mark-text">BaonCheck</div>
+    </div>
+
+    <nav>
+      <div class="nav-group-label">Main</div>
+      <a href="dashboard.html" class="nav-link" data-page="dashboard"><span class="nav-dot"></span>Dashboard</a>
+      <a href="expenses.html" class="nav-link" data-page="expenses"><span class="nav-dot"></span>Expenses</a>
+      <a href="budget.html" class="nav-link" data-page="budget"><span class="nav-dot"></span>Budget</a>
+      <a href="reports.html" class="nav-link" data-page="reports"><span class="nav-dot"></span>Reports</a>
+
+      <div class="nav-group-label">Account</div>
+      <a href="profile.html" class="nav-link" data-page="profile"><span class="nav-dot"></span>Profile</a>
+      <a href="admin.html" class="nav-link" data-page="admin" data-admin-only><span class="nav-dot"></span>Manage users</a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="sidebar-user">
+        <div class="avatar" id="sidebarAvatar">--</div>
+        <div class="who">
+          <div class="name" id="sidebarUserName">—</div>
+          <div class="role" id="sidebarUserRole">—</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn" style="width:100%; margin-top:8px; justify-content:flex-start;">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="topbar-title" style="display:flex; align-items:flex-start;">
+        <button class="menu-toggle" id="menuToggle" aria-label="Open menu">☰</button>
+        <div>
+          <h1 id="greeting">Good day</h1>
+          <p>Here's where your baon went this week.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <a href="expenses.html" class="btn btn-primary">+ Add expense</a>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Spent today</div>
+        <div class="stat-value" id="statToday">₱0.00</div>
+        <div class="stat-sub" id="statTodayCount">0 transactions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Spent this month</div>
+        <div class="stat-value" id="statMonth">₱0.00</div>
+        <div class="stat-sub" id="statMonthCount">0 transactions</div>
+      </div>
+      <div class="stat-card" id="statBudgetCard">
+        <div class="stat-label">Budget remaining</div>
+        <div class="stat-value" id="statBudget">₱0.00</div>
+        <div class="stat-sub" id="statBudgetSub">of ₱0.00 set</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Recent expenses</h2>
+            <p>Your last few recorded transactions</p>
+          </div>
+          <a href="expenses.html" class="btn btn-secondary btn-sm">View all</a>
+        </div>
+        <div id="recentList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>By category</h2>
+            <p>This month, by where it went</p>
+          </div>
+        </div>
+        <div id="categoryBreakdown"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/store.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "accounts": [
+    {
+      "role": "organizer",
+      "name": "Alex Rivera",
+      "email": "organizer@university.edu",
+      "password": "organizer123",
+      "org": "Computer Science Society",
+      "department": "College of Science",
+      "avatar": "https://i.pravatar.cc/100?img=12"
+    },
+    {
+      "role": "organizer",
+      "name": "Jamie Cruz",
+      "email": "jamie.cruz@university.edu",
+      "password": "organizer123",
+      "org": "Engineering Society",
+      "department": "College of Engineering",
+      "avatar": "https://i.pravatar.cc/100?img=15"
+    },
+    {
+      "role": "approver",
+      "name": "Dr. Maria Santos",
+      "email": "approver@university.edu",
+      "password": "approver123",
+      "org": "Facilities Office",
+      "department": "Administration",
+      "avatar": "https://i.pravatar.cc/100?img=32"
+    },
+    {
+      "role": "approver",
+      "name": "Engr. Luis Dela Cruz",
+      "email": "luis.delacruz@university.edu",
+      "password": "approver123",
+      "org": "Facilities Office",
+      "department": "Sports Complex",
+      "avatar": "https://i.pravatar.cc/100?img=16"
+    },
+    {
+      "role": "admin",
+      "name": "Admin Office",
+      "email": "admin@university.edu",
+      "password": "admin123",
+      "org": "System Admin",
+      "department": "IT Center",
+      "avatar": "https://i.pravatar.cc/100?img=45"
+    },
+    {
+      "role": "admin",
+      "name": "Admin Office (Ricky)",
+      "email": "ricky@icct.edu.ph",
+      "password": "ricky",
+      "org": "System Admin",
+      "department": "IT Center",
+      "avatar": "https://i.pravatar.cc/100?img=45"
+    },
+    {
+      "role": "admin",
+      "name": "IT Administrator",
+      "email": "it.admin@university.edu",
+      "password": "admin123",
+      "org": "System Admin",
+      "department": "IT Center",
+      "avatar": "https://i.pravatar.cc/100?img=22"
+    }
+  ],
+  "meta": {
+    "note": "Prototype accounts - passwords are plain text for demo only. Replace with hashed passwords in production (PHP/MySQL).",
+    "version": "1.0",
+    "lastUpdated": "2026-09-23"
+  }
+}
