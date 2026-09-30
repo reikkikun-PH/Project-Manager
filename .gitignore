@@ -1,3 +1,6 @@
+# Hosted project folders live only on the host PC, never in git
+Project List/
+
 # Secrets - never commit real credentials (see credentials.example.json)
 credentials.json
 project_auth.json
