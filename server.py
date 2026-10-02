@@ -130,8 +130,91 @@ def log_line(tag, msg):
 # Env vars RESEND_API_KEY / NOTIFY_TO override the file. With no config (or
 # enabled: false) nothing is sent - the dashboard works exactly as before.
 NOTIFY_PATH = os.path.join(DATA_DIR, "notify.json")
+# host.py writes the pinned quick-tunnel link here as soon as it is up.
+SESSION_URL_PATH = os.path.join(DATA_DIR, "tunnel-url.txt")
 RESEND_URL = "https://api.resend.com/emails"
 _notify_state = {"ok": None, "err": ""}
+
+
+def _read_session_file():
+    """Raw tunnel link host.py wrote, or ''."""
+    env = os.environ.get("PM_PUBLIC_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    try:
+        with open(SESSION_URL_PATH, "r", encoding="utf-8") as f:
+            v = f.read().strip()
+        return v.rstrip("/") if v.startswith("http") else ""
+    except OSError:
+        return ""
+
+
+# Last verified public link + how many probes in a row failed. host.py clears
+# the file on a clean exit, but a killed/host.py-crashed session would leave a
+# dead URL behind - so we probe the tunnel itself before advertising it.
+_url_probe = {"url": "", "strikes": 0}
+_url_probe_started = False
+_url_probe_lock = threading.Lock()
+_URL_PROBE_TTL = 10  # seconds between liveness probes (own tunnel, cheap)
+
+
+def _tunnel_answers(url):
+    """True only if this instance's own tunnel answers.
+
+    An expired quick-tunnel domain still returns 200 with a Cloudflare
+    placeholder page, so status is not enough: we hit /api/session and
+    require OUR json back (right instance). That cannot be faked by the
+    placeholder, so a dead tunnel is detected reliably."""
+    try:
+        req = urllib.request.Request(
+            url + "/api/session",
+            headers={"User-Agent": "ServerProjectManager/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            raw = r.read(2048)
+        data = json.loads(raw.decode("utf-8", "replace"))
+        return bool(data.get("ok")) and data.get("instance") == INSTANCE
+    except Exception:
+        return False
+
+
+def _url_probe_loop():
+    while True:
+        try:
+            cand = _read_session_file()
+            if not cand:
+                with _url_probe_lock:
+                    _url_probe.update({"url": "", "strikes": 0})
+            else:
+                alive = _tunnel_answers(cand)
+                with _url_probe_lock:
+                    if alive:
+                        _url_probe.update({"url": cand, "strikes": 0})
+                    else:
+                        # One miss can be a blip; two in a row means dead.
+                        _url_probe["strikes"] += 1
+                        if _url_probe["strikes"] >= 2:
+                            _url_probe["url"] = ""
+        except Exception:
+            pass
+        time.sleep(_URL_PROBE_TTL)
+
+
+def public_base_url():
+    """This session's live public link, or '' when no tunnel is answering.
+
+    Kept fresh by a background probe so a dead tunnel stops being advertised
+    even if host.py never got to clean up."""
+    global _url_probe_started
+    if not _url_probe_started:
+        _url_probe_started = True
+        threading.Thread(target=_url_probe_loop, daemon=True).start()
+    with _url_probe_lock:
+        return _url_probe["url"]
+
+
+def dashboard_link():
+    """What to show people: the public link if there is one, else localhost."""
+    return (public_base_url() or f"http://127.0.0.1:{PORT}") + "/"
 
 
 def notify_config():
@@ -226,7 +309,7 @@ def notify(subject, body):
                     f"(no api key / recipient): {subject}")
         return
     stamp = time.strftime("%Y-%m-%d %H:%M")
-    full = (f"{body}\n\nDashboard: http://127.0.0.1:{PORT}/\n"
+    full = (f"{body}\n\nDashboard: {dashboard_link()}\n"
             f"Instance: {INSTANCE} (slot {SLOT})\nTime: {stamp}\n")
 
     def worker():
@@ -265,7 +348,9 @@ def notify_project_request(name, pid, owner, ptype):
            f"Id:      {pid}\n"
            f"Type:    {ptype}\n"
            f"Owner:   {owner}\n\n"
-           f"Approve or reject it on the project's card in the dashboard.")
+           f"Approve or reject it on the project's card in the dashboard.\n"
+           f"Once approved it will be live at: "
+           f"{(public_base_url() or f'http://127.0.0.1:{PORT}')}/p/{pid}/")
 
 
 def _query(path):
@@ -2554,6 +2639,14 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             self._send_json({"ok": True, "system": system_info()})
             return
 
+        if path == "/api/session":
+            # Tiny identity probe. The tunnel liveness check hits this through
+            # the public link and requires our own JSON back, which is how a
+            # dead-but-still-200 Cloudflare placeholder page gets spotted.
+            self._send_json({"ok": True, "instance": INSTANCE, "slot": SLOT,
+                             "port": PORT})
+            return
+
         if path == "/api/projects":
             _req_user = _query(self.path).get("username", "")
             _acc = find_account(_req_user) if _req_user else None
@@ -2570,9 +2663,11 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 _role = "visitor"
             # instance info lets the dashboard label itself and lets a launcher
             # confirm it reached the instance it intended to (multi-instance).
+            # sessionUrl is the live public tunnel link ("" until one exists).
             self._send_json({"projects": _list, "role": _role,
                              "instance": INSTANCE, "slot": SLOT,
                              "port": PORT,
+                             "sessionUrl": public_base_url(),
                              "appPorts": [MANAGED_PORT_START, MANAGED_PORT_END]})
             return
 
@@ -2952,8 +3047,9 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             ok, detail = _send_resend(
                 cfg, f"[{INSTANCE}] Test e-mail",
-                "This is a test from your Project Manager.\n\n"
-                "If you can read this, approval requests will reach you too.")
+                f"This is a test from your Project Manager.\n\n"
+                f"Open the dashboard: {dashboard_link()}\n\n"
+                f"If you can read this, approval requests will reach you too.")
             _notify_log(f"{time.strftime('%H:%M:%S')} "
                         f"{'SENT (test)' if ok else 'FAILED (test)'}: {detail[:120]}")
             self._send_json({"ok": ok, "error": None if ok else detail,

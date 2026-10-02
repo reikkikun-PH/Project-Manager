@@ -34,6 +34,23 @@ link (`https://xxxx.trycloudflare.com`) and a link per project. Ctrl+C stops bot
 The dashboard is at `http://localhost:8000` — sign in with **`admin` / `admin123`**
 unless you set your own in `credentials.json`.
 
+### The session link
+
+As soon as the tunnel is up, the dashboard shows the **current public link** — in the
+header (`PUBLIC https://xxxx.trycloudflare.com`) and in the footer, both clickable —
+and every approval e-mail links to it instead of `127.0.0.1`, which would be useless
+to anyone not sitting at the host PC.
+
+The link is verified live rather than trusted blindly: the manager re-checks its own
+tunnel every 10 seconds, so a link that has gone dead stops being advertised within
+about half a minute (this matters because an expired `trycloudflare.com` domain still
+returns HTTP 200 with a placeholder page, so the check asks for `/api/session` and
+requires this instance's own JSON back). With no tunnel running, the dashboard says
+`no tunnel yet` rather than showing a stale URL.
+
+Project cards keep using whatever address you opened the dashboard with, so browsing
+locally stays local and browsing via the tunnel keeps the tunnel link.
+
 ---
 
 ## What it does
@@ -75,9 +92,9 @@ What gets emailed:
 
 | Trigger | Email |
 |---|---|
-| Signup asking for the **admin** role | username, and where to approve it |
+| Signup asking for the **admin** role | username, where to approve it, and the session link |
 | A **user** account signup | username, and a note that it's active immediately |
-| A **user's** project upload (waiting for approval) | project name, id, type, owner |
+| A **user's** project upload (waiting for approval) | project name, id, type, owner, and where it will be live |
 | An **admin** upload | *nothing* — it goes live immediately |
 
 Verify it end to end from the dashboard: sign in as admin → **ACCOUNTS** →
