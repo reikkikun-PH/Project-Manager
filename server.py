@@ -23,6 +23,7 @@ import signal
 import platform
 import subprocess
 import mimetypes
+import threading
 import urllib.request
 import urllib.error
 from http.server import SimpleHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
@@ -118,6 +119,116 @@ ERR_UPLOAD_NOT_ZIP = "Upload a .zip file (not detected)."
 def log_line(tag, msg):
     """Timestamped server log line (keeps demo + tunnel logs readable)."""
     print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}")
+
+
+# --- Approval e-mail notifications (Resend, optional) ----------------------
+# Config lives in notify.json NEXT TO YOUR STATE (never in git):
+#   { "enabled": true,
+#     "resendApiKey": "re_...",
+#     "to": "you@example.com",
+#     "from": "Project Manager <onboarding@resend.dev>" }
+# Env vars RESEND_API_KEY / NOTIFY_TO override the file. With no config (or
+# enabled: false) nothing is sent - the dashboard works exactly as before.
+NOTIFY_PATH = os.path.join(DATA_DIR, "notify.json")
+RESEND_URL = "https://api.resend.com/emails"
+_notify_state = {"ok": None, "err": ""}
+
+
+def notify_config():
+    """Read notify.json (+ env overrides). {} when unset or unreadable."""
+    cfg = {}
+    try:
+        if os.path.isfile(NOTIFY_PATH):
+            with open(NOTIFY_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                cfg = raw
+    except Exception as e:
+        if _notify_state["err"] != str(e):
+            _notify_state["err"] = str(e)
+            log_line("Notify", f"config unreadable: {e}")
+    key = os.environ.get("RESEND_API_KEY", "").strip()
+    if key:
+        cfg["resendApiKey"] = key
+    to = os.environ.get("NOTIFY_TO", "").strip()
+    if to:
+        cfg["to"] = to
+    return cfg
+
+
+def _send_resend(cfg, subject, body):
+    """POST one email through Resend. Returns (ok, detail). Never raises."""
+    key = str(cfg.get("resendApiKey") or "").strip()
+    to = str(cfg.get("to") or "").strip()
+    sender = str(cfg.get("from")
+                 or "Project Manager <onboarding@resend.dev>").strip()
+    if not key or not to:
+        return False, "no api key or recipient configured"
+    payload = json.dumps({
+        "from": sender,
+        "to": [a.strip() for a in to.split(",") if a.strip()],
+        "subject": subject,
+        "text": body,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        RESEND_URL, data=payload, method="POST",
+        headers={"Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json",
+                 # Resend sits behind Cloudflare, which rejects requests with no
+                 # User-Agent (error 1010). Identify ourselves honestly.
+                 "User-Agent": "ServerProjectManager/1.0 (stdlib urllib)"})
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            detail = r.read().decode("utf-8", "replace")[:200]
+            return 200 <= r.status < 300, f"HTTP {r.status} {detail}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def notify(subject, body):
+    """Email the approver in the background. Fire-and-forget by design.
+
+    Never raises and never blocks the caller, so a slow/broken mail API
+    can't delay an upload or leak an error back to the browser.
+    """
+    cfg = notify_config()
+    if cfg.get("enabled") is False:
+        return
+    if not str(cfg.get("resendApiKey") or "").strip():
+        return
+    stamp = time.strftime("%Y-%m-%d %H:%M")
+    full = (f"{body}\n\nDashboard: http://127.0.0.1:{PORT}/\n"
+            f"Instance: {INSTANCE} (slot {SLOT})\nTime: {stamp}\n")
+
+    def worker():
+        ok, detail = _send_resend(cfg, subject, full)
+        if ok:
+            log_line("Notify", f"sent: {subject}")
+        else:
+            log_line("Notify", f"FAILED: {subject} - {detail}")
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def notify_admin_request(username):
+    """A user asked for the admin role."""
+    notify(f"[{INSTANCE}] Approval needed: admin account '{username}'",
+           f"A signup requested ADMIN access.\n\n"
+           f"Username: {username}\n\n"
+           f"Approve or reject it in the ACCOUNTS card of the dashboard.")
+
+
+def notify_project_request(name, pid, owner, ptype):
+    """A user's project upload is waiting for approval."""
+    notify(f"[{INSTANCE}] Approval needed: project '{name}'",
+           f"A project upload is waiting for approval.\n\n"
+           f"Project: {name}\n"
+           f"Id:      {pid}\n"
+           f"Type:    {ptype}\n"
+           f"Owner:   {owner}\n\n"
+           f"Approve or reject it on the project's card in the dashboard.")
 
 
 def _query(path):
@@ -2773,6 +2884,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             log_line("Auth", f"Registered {username} ({want_role}, "
                      f"{'pending' if pending_admin else 'active'})")
             if pending_admin:
+                notify_admin_request(username)
                 self._send_json({"ok": True, "status": STATUS_PENDING,
                                  "message": "Admin request sent - wait for approval, then sign in."})
             else:
@@ -2954,6 +3066,8 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             log_line("Upload", f"{_name} -> {pid} ({n} files, {ptype}: {target}) "
                      f"by {_uploader.get('username', '')} ({entry['approval']})")
             if entry["approval"] == APPROVAL_PENDING:
+                notify_project_request(_name, pid,
+                                      entry.get("owner", ""), ptype)
                 _up_msg = (f"Sent \"{_name}\" for admin approval - "
                            "it appears below once approved.")
             else:
