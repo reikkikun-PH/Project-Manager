@@ -45,6 +45,40 @@ VALID_TYPES = ("static", "proxy", "managed")
 BLOCKED = ("/server.py", "/projects.json", "/host.bat", "/host.sh",
            "/.env", "/credentials.json", "/project_auth.json", "/config")
 
+# --- Config knobs (all in one place) ---
+# Ports 8100-8199 host managed-app backends; PORT is the manager itself.
+MANAGED_PORT_START = 8100
+MANAGED_PORT_END = 8199
+# Seconds to wait for a managed app's port on start before reporting back.
+START_GRACE_SECS = 12
+# Max raw zip bytes accepted by /api/upload (clear error above this).
+UPLOAD_LIMIT_BYTES = 200 * 1024 * 1024
+# Seconds an /api/system snapshot is reused before re-probing hardware.
+SYSTEM_CACHE_TTL = 5.0
+
+# --- Shared message + role constants (single source of truth) ---
+ROLE_ADMIN = "admin"
+ERR_ADMIN_REQUIRED = "Admin sign-in required."
+ERR_LOCKED = "Project is locked - unlock it first to make changes."
+ERR_UPLOAD_TOO_BIG = (
+    "Zip is over 200MB - split it up or host the folder directly.")
+ERR_UPLOAD_NOT_ZIP = "Upload a .zip file (not detected)."
+
+
+def log_line(tag, msg):
+    """Timestamped server log line (keeps demo + tunnel logs readable)."""
+    print(f"[{time.strftime('%H:%M:%S')}] [{tag}] {msg}")
+
+
+def _query(path):
+    """Parse a request URL query string into {name: value}. Never raises."""
+    try:
+        from urllib.parse import parse_qs
+        return {k: (v[0] if v else "") for k, v in
+                parse_qs(urlparse(path).query).items()}
+    except Exception:
+        return {}
+
 
 _PROJECTS_CACHE = {"mtime": 0, "data": []}
 
@@ -143,17 +177,30 @@ def project_creds(proj):
 # --- Admin auth (public read-only dashboard, admin manages) ---
 CREDS_PATH = os.path.join(BASE_DIR, "credentials.json")
 
+# School-demo default: fresh clones have no credentials.json yet, so they
+# sign in as admin / admin123. Creating credentials.json replaces this
+# entirely (it is gitignored and never uploaded).
+DEFAULT_ADMIN = {"username": "admin", "password": "admin123", "role": "admin"}
+_DEFAULT_WARNED = False
+
 
 def load_credentials():
+    """Admin accounts. Falls back to admin/admin123 when unconfigured."""
+    global _DEFAULT_WARNED
     try:
         if os.path.exists(CREDS_PATH):
             with open(CREDS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list):
+                if isinstance(data, list) and any(
+                        isinstance(a, dict) and a.get("username") for a in data):
                     return data
     except Exception as e:
         print(f"[Auth] load fail: {e}")
-    return []
+    if not _DEFAULT_WARNED:
+        _DEFAULT_WARNED = True
+        print("[Auth] no credentials.json - using default admin/admin123 "
+              "(create credentials.json to change it)")
+    return [dict(DEFAULT_ADMIN)]
 
 
 def find_account(username):
@@ -166,18 +213,18 @@ def find_account(username):
 
 def is_admin_user(username):
     acc = find_account(username) if (username or "").strip() else None
-    return acc is not None and (acc.get("role") or "admin").strip().lower() == "admin"
+    return acc is not None and (acc.get("role") or ROLE_ADMIN).strip().lower() == ROLE_ADMIN
 
 
 def requester_is_admin(body):
     """Mutating calls must carry body.requester of an admin account."""
     req = ((body.get("requester") or "") if isinstance(body, dict) else "").strip()
     if not req:
-        return None, "Admin sign-in required."
+        return None, ERR_ADMIN_REQUIRED
     acc = find_account(req)
     if acc is None:
         return None, "Unknown account - please sign in again."
-    if (acc.get("role") or "admin").strip().lower() != "admin":
+    if (acc.get("role") or ROLE_ADMIN).strip().lower() != ROLE_ADMIN:
         return None, "Admin role required."
     return acc, None
 
@@ -350,25 +397,207 @@ _CPU_LAST = {"total": 0, "idle": 0, "per": {}}
 
 
 def _cpu_times_linux():
-    """(overall, per-core) (total, idle) jiffies from /proc/stat."""
+    """(overall, per-core) (total, idle) jiffies from /proc/stat.
+
+    Tolerant parser for ARM/Android (Termux) kernels: some kernels expose
+    fewer fields, extra spaces, or per-core lines interleaved with other
+    counters - so we scan every cpu* line instead of stopping at the
+    first non-cpu line, and accept 4+ fields (user, nice, system, idle,
+    + optional iowait/irq/softirq...).
+    """
     overall = None
     per = {}
     with open("/proc/stat", "r") as f:
         for line in f:
             if not line.startswith("cpu"):
-                break
+                continue
             parts = line.split()
-            if len(parts) < 8:
+            if len(parts) < 5:  # need at least user/nice/system/idle
+                continue
+            name = parts[0]
+            if name != "cpu" and not (name.startswith("cpu") and name[3:].isdigit()):
                 continue
             try:
-                vals = list(map(int, parts[1:8]))
+                vals = list(map(int, parts[1:]))
             except ValueError:
                 continue
-            if parts[0] == "cpu":
-                overall = (sum(vals), vals[3] + vals[4])  # total, idle+iowait
-            elif parts[0][3:].isdigit():
-                per[parts[0]] = (sum(vals), vals[3] + vals[4])
+            total = sum(vals)
+            idle = vals[3] + (vals[4] if len(vals) > 4 else 0)  # idle + iowait
+            if name == "cpu":
+                overall = (total, idle)
+            else:
+                per[name] = (total, idle)
+            if overall is not None and len(per) >= 256:
+                break
     return overall, per
+
+
+def _cpu_count():
+    """Logical CPU count with ARM/Termux fallbacks. Never raises."""
+    try:
+        n = os.cpu_count()
+        if n:
+            return int(n)
+    except Exception:
+        pass
+    # /sys/devices/system/cpu/present -> "0-7" means 8 cores
+    try:
+        with open("/sys/devices/system/cpu/present", "r") as f:
+            txt = f.read().strip()
+            total = 0
+            for chunk in txt.split(","):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                if "-" in chunk:
+                    a, b = chunk.split("-", 1)
+                    total += int(b) - int(a) + 1
+                else:
+                    total += 1
+            if total > 0:
+                return total
+    except Exception:
+        pass
+    # Count "processor : N" lines in /proc/cpuinfo (works on ARM)
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            n = sum(1 for line in f if line.startswith("processor"))
+            if n > 0:
+                return n
+    except Exception:
+        pass
+    # Count cpuN directories (some Android kernels hide /proc/stat)
+    try:
+        base = "/sys/devices/system/cpu"
+        n = sum(1 for d in os.listdir(base)
+                if d.startswith("cpu") and d[3:].isdigit()
+                and os.path.isdir(os.path.join(base, d)))
+        if n > 0:
+            return n
+    except Exception:
+        pass
+    return 0
+
+
+def _cpu_arch():
+    """Machine architecture, e.g. aarch64, armv7l, x86_64. Never raises."""
+    for getter in (
+        lambda: platform.machine(),
+        lambda: (os.uname().machine if hasattr(os, "uname") else ""),
+        lambda: platform.processor(),
+    ):
+        try:
+            v = (getter() or "").strip()
+            if v and v.lower() not in ("unknown",):
+                return v
+        except Exception:
+            continue
+    return ""
+
+
+def _getprop(name):
+    """Android system property via getprop (Termux). '' when unavailable."""
+    try:
+        if not shutil.which("getprop"):
+            return ""
+        r = subprocess.run(["getprop", name], capture_output=True,
+                           text=True, timeout=3)
+        if r.returncode == 0:
+            return (r.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _cpu_model():
+    """Human-readable CPU/SoC model. ARM-first, best effort, never raises."""
+    # Android properties first - most reliable SoC names on phones
+    for prop in ("ro.soc.model", "ro.soc.manufacturer", "ro.hardware",
+                 "ro.board.platform", "ro.mediatek.platform",
+                 "ro.arch"):
+        try:
+            v = _getprop(prop)
+            if v and v.lower() not in ("unknown", "qcom", ""):
+                # ro.soc.model alone is ideal ("Snapdragon 8 Gen 2");
+                # otherwise keep looking and combine below via cpuinfo.
+                if prop in ("ro.soc.model", "ro.hardware", "ro.board.platform"):
+                    # Prefer full SoC string but don't stop cpuinfo check
+                    # that may give a richer "model name".
+                    if prop == "ro.soc.model":
+                        return v
+                    first_hit = v
+                    break
+        except Exception:
+            continue
+    else:
+        first_hit = ""
+    # Device-tree model (e.g. "Xiaomi 22041216G") - useful context
+    dt_model = ""
+    for cand in ("/proc/device-tree/model",
+                 "/sys/devices/soc0/machine",
+                 "/sys/devices/soc0/family"):
+        try:
+            if os.path.isfile(cand):
+                with open(cand, "r", encoding="utf-8", errors="replace") as f:
+                    v = f.read().strip().strip("\x00").strip()
+                    if v:
+                        dt_model = v
+                        break
+        except Exception:
+            continue
+    # /proc/cpuinfo - ARM uses "Hardware", "model name", "Processor"...
+    # x86 uses "model name". Take the first non-empty in priority order.
+    info = {}
+    try:
+        if os.path.isfile("/proc/cpuinfo"):
+            with open("/proc/cpuinfo", "r", encoding="utf-8",
+                      errors="replace") as f:
+                for line in f:
+                    if ":" not in line:
+                        continue
+                    k, _, v = line.partition(":")
+                    k = k.strip().lower()
+                    v = v.strip()
+                    if not v or k in info:
+                        continue
+                    info[k] = v
+    except Exception:
+        pass
+    for key in ("model name", "hardware", "model", "processor",
+                "cpu model", "cpu implementer"):
+        v = info.get(key, "")
+        if v and v.lower() not in ("unknown",):
+            # On ARM phones "Hardware : Qualcomm Technologies, Inc ..."
+            # is common - combine with SoC prop when we have both.
+            if first_hit and first_hit.lower() not in v.lower():
+                return f"{v} ({first_hit})"
+            return v
+    if first_hit:
+        return first_hit
+    if dt_model:
+        return dt_model
+    # Last resort: count-based generic label so ARM is never blank
+    arch = _cpu_arch()
+    if arch:
+        return arch
+    return ""
+
+
+def _cpu_percent_loadavg(cpu_count):
+    """Fallback CPU % from /proc/loadavg (1-min avg / cores).
+
+    Used when /proc/stat is unreadable (restricted Android kernels) or
+    the delta counter hasn't advanced yet. Returns None when unavailable.
+    """
+    try:
+        if not os.path.isfile("/proc/loadavg"):
+            return None
+        with open("/proc/loadavg", "r") as f:
+            load1 = float(f.read().strip().split()[0])
+        n = cpu_count or _cpu_count() or 1
+        return round(max(0.0, min(100.0, 100.0 * load1 / n)), 1)
+    except Exception:
+        return None
 
 
 def _cpu_times_windows():
@@ -390,34 +619,66 @@ def _cpu_times_windows():
 
 
 def _cpu_percent():
-    """(overall %, per-core [%]) since the last call. First call primes."""
+    """(overall %, per-core [%]) since the last call.
+
+    Chain: /proc/stat delta (Linux/Android) -> GetSystemTimes (Windows)
+    -> /proc/loadavg fallback (restricted ARM kernels, first poll).
+    The loadavg fallback means Termux sees a value immediately instead
+    of permanent N/A. First /proc/stat call still primes the baseline.
+    """
+    cpu_n = _cpu_count()
     try:
         if os.path.exists("/proc/stat"):
-            overall, per = _cpu_times_linux()
+            try:
+                overall, per = _cpu_times_linux()
+            except Exception as e:
+                print(f"[System] cpu probe fail: {e}")
+                overall, per = None, {}
+            if overall is not None:
+                total, idle = overall
+                last = _CPU_LAST
+                if not last["total"] or total <= last["total"]:
+                    last.update({"total": total, "idle": idle, "per": per})
+                    # Prime: still return a loadavg estimate so the
+                    # dashboard never sticks on N/A on ARM phones.
+                    fb = _cpu_percent_loadavg(cpu_n)
+                    if fb is not None:
+                        return fb, []
+                    return None, []
+                dt = total - last["total"]
+                pct = round(100.0 * (1.0 - (idle - last["idle"]) / dt), 1) if dt > 0 else 0.0
+                cores = []
+                for name in sorted(per, key=lambda c: int(c[3:])):
+                    t1, i1 = last["per"].get(name, (0, 0))
+                    t2, i2 = per[name]
+                    d = t2 - t1
+                    cores.append(round(100.0 * (1.0 - (i2 - i1) / d), 1) if d > 0 else 0.0)
+                last.update({"total": total, "idle": idle, "per": per})
+                return max(0.0, min(100.0, pct)), [max(0.0, min(100.0, c)) for c in cores]
+            # /proc/stat unreadable or empty (some Android kernels):
+            # fall through to loadavg below.
         elif IS_WINDOWS:
-            overall, per = _cpu_times_windows()
-        else:
-            return None, []
-        if overall is None:
-            return None, []
+            try:
+                # _cpu_times_windows returns ((total, idle), per_dict)
+                overall, _per = _cpu_times_windows()
+                total, idle = overall
+                last = _CPU_LAST
+                if not last["total"] or total <= last["total"]:
+                    last.update({"total": total, "idle": idle, "per": {}})
+                    return None, []
+                dt = total - last["total"]
+                pct = round(100.0 * (1.0 - (idle - last["idle"]) / dt), 1) if dt > 0 else 0.0
+                last.update({"total": total, "idle": idle, "per": {}})
+                return max(0.0, min(100.0, pct)), []
+            except Exception as e:
+                print(f"[System] cpu probe fail: {e}")
+                return None, []
     except Exception as e:
         print(f"[System] cpu probe fail: {e}")
-        return None, []
-    total, idle = overall
-    last = _CPU_LAST
-    if not last["total"] or total <= last["total"]:
-        last.update({"total": total, "idle": idle, "per": per})
-        return None, []
-    dt = total - last["total"]
-    pct = round(100.0 * (1.0 - (idle - last["idle"]) / dt), 1) if dt > 0 else 0.0
-    cores = []
-    for name in sorted(per, key=lambda c: int(c[3:])):
-        t1, i1 = last["per"].get(name, (0, 0))
-        t2, i2 = per[name]
-        d = t2 - t1
-        cores.append(round(100.0 * (1.0 - (i2 - i1) / d), 1) if d > 0 else 0.0)
-    last.update({"total": total, "idle": idle, "per": per})
-    return max(0.0, min(100.0, pct)), [max(0.0, min(100.0, c)) for c in cores]
+    fb = _cpu_percent_loadavg(cpu_n)
+    if fb is not None:
+        return fb, []
+    return None, []
 
 
 try:
@@ -427,23 +688,52 @@ except Exception:
 
 
 def _cpu_temp():
-    """Hottest thermal zone in C (Linux). None when unavailable."""
-    try:
-        hottest = None
-        base = "/sys/class/thermal"
-        for zone in os.listdir(base):
+    """Hottest thermal zone in C (Linux/Android). None when unavailable.
+
+    Termux often can't list /sys/class/thermal, so also try the virtual
+    thermal path, per-CPU cpufreq temp files, and the battery sensor
+    (last resort - better than nothing on phones).
+    """
+    cands = [
+        "/sys/class/thermal",
+        "/sys/devices/virtual/thermal",
+    ]
+    hottest = None
+    for base in cands:
+        try:
+            zones = os.listdir(base)
+        except OSError:
+            continue
+        for zone in zones:
             if not zone.startswith("thermal_zone"):
                 continue
             try:
                 with open(os.path.join(base, zone, "temp"), "r") as f:
-                    v = int(f.read().strip()) / 1000.0
+                    raw = f.read().strip()
+                v = int(float(raw))
+                # Kernels report millidegrees (45000) or degrees (45);
+                # normalize anything plausibly milli-scale.
+                v = v / 1000.0 if v > 1000 else float(v)
             except (OSError, ValueError):
                 continue
             if 0 < v < 150 and (hottest is None or v > hottest):
                 hottest = v
-        return round(hottest, 1) if hottest is not None else None
-    except OSError:
-        return None
+        if hottest is not None:
+            return round(hottest, 1)
+    # Battery temp is in tenths of a degree on Android
+    for cand in ("/sys/class/power_supply/battery/temp",
+                 "/sys/devices/virtual/thermal/thermal_zone0/temp"):
+        try:
+            if os.path.isfile(cand):
+                with open(cand, "r") as f:
+                    raw = f.read().strip()
+                v = int(float(raw))
+                v = v / 10.0 if 100 < v < 1000 else (v / 1000.0 if v >= 1000 else float(v))
+                if 0 < v < 150:
+                    return round(v, 1)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _ram_linux():
@@ -540,7 +830,7 @@ def _gpus():
 
 
 _SYSTEM_CACHE = {"at": 0.0, "data": None}
-_SYSTEM_TTL = 5.0  # dashboard polls ~30s; spawn nvidia-smi at most 1x/5s
+_SYSTEM_TTL = SYSTEM_CACHE_TTL  # dashboard polls ~30s; spawn nvidia-smi at most 1x/5s
 
 
 def system_info():
@@ -564,9 +854,20 @@ def system_info():
     disk_total, disk_used = _disk()
     disk_pct = (round(100.0 * disk_used / disk_total, 1)
                 if disk_total else None)
+    try:
+        cpu_arch = _cpu_arch()
+    except Exception:
+        cpu_arch = ""
+    try:
+        cpu_model = _cpu_model()
+    except Exception:
+        cpu_model = ""
     data = {
         "platform": platform.system(),
-        "cpu_count": os.cpu_count() or 0,
+        "cpu_arch": cpu_arch,
+        "cpu_model": cpu_model,
+        "cpu_is_arm": (cpu_arch or "").lower().startswith(("arm", "aarch")),
+        "cpu_count": _cpu_count(),
         "cpu_percent": cpu,
         "cpu_per_core": cores,
         "cpu_temp_c": _cpu_temp(),
@@ -595,7 +896,7 @@ def system_info():
 # marking it running. Served through /p/<id>/ like proxy projects.
 _RUNNERS = {}  # id -> {"proc": Popen|None, "port": int, "note": str}
 _PYTHON = None
-_START_GRACE = 12  # seconds to wait for the port on start
+_START_GRACE = START_GRACE_SECS  # seconds to wait for the port on start
 
 
 def find_python():
@@ -636,7 +937,7 @@ def find_python():
     return None
 
 
-def free_port(start=8100, end=8199):
+def free_port(start=MANAGED_PORT_START, end=MANAGED_PORT_END):
     for p in range(start, end + 1):
         if p == PORT:
             continue
@@ -798,14 +1099,14 @@ def start_managed(proj):
             tail = _log_tail(err_log) or _log_tail(out_log)
             msg = f"Exited (code {proc.returncode})." + (f" {tail}" if tail else "")
             _RUNNERS[pid] = {"proc": None, "port": port, "note": msg}
-            print(f"[Runner] {pid} died on start: {msg}")
+            log_line("Runner", f"{pid} died on start: {msg}")
             return False, msg
         if port_open(port):
-            print(f"[Runner] {pid} running on port {port} (pid {proc.pid})")
+            log_line("Runner", f"{pid} running on port {port} (pid {proc.pid})")
             return True, f"Running on port {port}."
         time.sleep(0.5)
     _RUNNERS[pid]["note"] = "Started but port not responding yet."
-    print(f"[Runner] {pid} started (pid {proc.pid}), port {port} not answering yet")
+    log_line("Runner", f"{pid} started (pid {proc.pid}), port {port} not answering yet")
     return True, "Started - waiting for the port."
 
 
@@ -857,7 +1158,7 @@ def stop_managed(pid):
             proc.wait(timeout=5)
         except Exception:
             pass
-    print(f"[Runner] {pid} stopped")
+    log_line("Runner", f"{pid} stopped")
 
 
 def _stop_all_managed():
@@ -1256,7 +1557,7 @@ def install_runner(proj):
         _write_runner_file(sh_dest, sh_content, executable=True)
     except OSError as e:
         return False, f"Could not write runner: {e}", 0
-    print(f"[Runner] {'Rewrote' if existed else 'Installed'} standalone runner for {proj.get('id')} ({label}, port {port})")
+    log_line("Runner", f"{'Rewrote' if existed else 'Installed'} standalone runner for {proj.get('id')} ({label}, port {port})")
     how = ("double-click runner.bat on Windows, or `sh runner.sh` on Linux/macOS")
     verb = "rewrote" if existed else "ready"
     return True, f"runner.bat + runner.sh {verb} ({label}, port {port}) - {how} in the project folder.", port
@@ -1411,7 +1712,7 @@ def locked_change_error(pid):
     """Error message when pid is locked, else None. Guards management APIs."""
     proj = find_project(pid)
     if proj is not None and project_locked(proj):
-        return "Project is locked - unlock it first to make changes."
+        return ERR_LOCKED
     return None
 
 
@@ -1522,7 +1823,9 @@ class ManagerHandler(SimpleHTTPRequestHandler):
         except Exception:
             return {}
 
-    def _read_raw(self, limit=200 * 1024 * 1024):
+    def _read_raw(self, limit=UPLOAD_LIMIT_BYTES):
+        # None = empty body AND None = over the limit; callers tell them
+        # apart via Content-Length so users get a clear "too big" message.
         try:
             length = int(self.headers.get("Content-Length", 0))
         except (TypeError, ValueError):
@@ -1531,6 +1834,13 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             return None
         data = self.rfile.read(length)
         return data if len(data) == length else None
+
+    def _body_too_big(self):
+        """True when Content-Length alone already exceeds the upload cap."""
+        try:
+            return int(self.headers.get("Content-Length", 0)) > UPLOAD_LIMIT_BYTES
+        except (TypeError, ValueError):
+            return False
 
     # ---------- GET ----------
     def do_GET(self):
@@ -1558,15 +1868,10 @@ class ManagerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/browse":
             # Admin-only server-side folder picker for the Add form
-            try:
-                import urllib.parse as _upb
-                _qb = _upb.parse_qs(_upb.urlparse(self.path).query)
-                _ub = (_qb.get("username") or [""])[0]
-                _pb = (_qb.get("path") or [""])[0]
-            except Exception:
-                _ub, _pb = "", ""
+            _bq = _query(self.path)
+            _ub, _pb = _bq.get("username", ""), _bq.get("path", "")
             if not is_admin_user(_ub):
-                _deny = json.dumps({"ok": False, "error": "Admin sign-in required."}).encode("utf-8")
+                _deny = json.dumps({"ok": False, "error": ERR_ADMIN_REQUIRED}).encode("utf-8")
                 self.send_response(403)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(_deny)))
@@ -1616,25 +1921,15 @@ class ManagerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/system":
             # Admin-only host hardware snapshot for the dashboard monitor
-            try:
-                import urllib.parse as _ups
-                _qs = _ups.parse_qs(_ups.urlparse(self.path).query)
-                _us = (_qs.get("username") or [""])[0]
-            except Exception:
-                _us = ""
+            _us = _query(self.path).get("username", "")
             if not is_admin_user(_us):
-                self._send_json({"ok": False, "error": "Admin sign-in required."}, 403)
+                self._send_json({"ok": False, "error": ERR_ADMIN_REQUIRED}, 403)
                 return
             self._send_json({"ok": True, "system": system_info()})
             return
 
         if path == "/api/projects":
-            try:
-                import urllib.parse as _upq
-                _q = _upq.parse_qs(_upq.urlparse(self.path).query)
-                _req_user = (_q.get("username") or [""])[0]
-            except Exception:
-                _req_user = ""
+            _req_user = _query(self.path).get("username", "")
             if is_admin_user(_req_user):
                 self._send_json({"projects": [public_project(p) for p in load_projects()],
                                  "role": "admin"})
@@ -1735,7 +2030,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             tok = secrets.token_urlsafe(32)
             _SESSIONS[tok] = {"pid": proj.get("id"), "user": entered_user or saved_user,
                               "exp": time.time() + _SESSION_TTL}
-            print(f"[Auth] Project sign-in {proj.get('id')} as {entered_user or saved_user or 'owner'}")
+            log_line("Auth", f"Project sign-in {proj.get('id')} as {entered_user or saved_user or 'owner'}")
             self.send_response(302)
             self.send_header("Location", f"/p/{proj.get('id')}/")
             self.send_header(
@@ -1868,7 +2163,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     matched = a
                     break
             if matched is not None:
-                role = (matched.get("role") or "admin").strip().lower()
+                role = (matched.get("role") or ROLE_ADMIN).strip().lower()
                 self._send_json({"ok": True, "username": matched.get("username", ""),
                                  "role": role})
             else:
@@ -1880,14 +2175,10 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             # project so it is immediately usable under /p/<id>/.
             # Raw zip bytes in body, params in query (avoids multipart parsing).
             # e.g. POST /api/upload?name=MySite&requester=admin&type=auto
-            try:
-                import urllib.parse as _upu
-                _q = _upu.parse_qs(_upu.urlparse(self.path).query)
-                _name = ((_q.get("name") or [""])[0] or "").strip()
-                _req = ((_q.get("requester") or [""])[0] or "").strip()
-                _want = ((_q.get("type") or ["auto"])[0] or "auto").strip().lower()
-            except Exception:
-                _name, _req, _want = "", "", "auto"
+            _uq = _query(self.path)
+            _name = (_uq.get("name", "") or "").strip()
+            _req = (_uq.get("requester", "") or "").strip()
+            _want = (_uq.get("type", "auto") or "auto").strip().lower()
             _admin, _err = requester_is_admin({"requester": _req})
             if _err:
                 # Drain body so the connection stays usable
@@ -1913,9 +2204,12 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     pass
                 self._send_json({"ok": False, "error": "Cannot upload for a proxy project."}, 400)
                 return
+            if self._body_too_big():
+                self._send_json({"ok": False, "error": ERR_UPLOAD_TOO_BIG}, 413)
+                return
             data = self._read_raw()
             if not data or len(data) < 4 or data[:2] != b"PK":
-                self._send_json({"ok": False, "error": "Upload a .zip file (not detected)."}, 400)
+                self._send_json({"ok": False, "error": ERR_UPLOAD_NOT_ZIP}, 400)
                 return
             projects = load_projects()
             pid = unique_id(slugify(_name), projects)
@@ -1958,7 +2252,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             projects.append(entry)
             save_projects(projects)
-            print(f"[Upload] {_name} -> {pid} ({n} files, {ptype}: {target})")
+            log_line("Upload", f"{_name} -> {pid} ({n} files, {ptype}: {target})")
             self._send_json({"ok": True, "id": pid, "target": target,
                              "type": ptype, "files": n, "entries": top,
                              "runnable": runnable,
@@ -2017,7 +2311,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 entry["id"] = pid
                 projects.append(entry)
                 save_projects(projects)
-                print(f"[Projects] Added {name} -> {pid} ({ptype}: {target})")
+                log_line("Projects", f"Added {name} -> {pid} ({ptype}: {target})")
                 self._send_json({"ok": True,
                                  "projects": [public_project(p) for p in projects]})
             except ValueError as ve:
@@ -2094,7 +2388,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     entry.pop("port", None)
                 stop_managed(pid)
                 save_projects(projects)
-                print(f"[Projects] Updated {pid}")
+                log_line("Projects", f"Updated {pid}")
                 self._send_json({"ok": True,
                                  "projects": [public_project(p) for p in projects]})
             except ValueError as ve:
@@ -2144,7 +2438,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": _lock_err}, 403)
                 return
             stop_managed(pid)
-            print(f"[Projects] Stopped {pid}")
+            log_line("Projects", f"Stopped {pid}")
             self._send_json({"ok": True,
                              "projects": [public_project(p) for p in load_projects()]})
             return
@@ -2212,7 +2506,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 entry.pop("locked", None)
                 _drop_project_sessions(pid)
                 save_projects(projects)
-                print(f"[Auth] Locked {pid} (credentials saved for '{uname or 'owner'}')")
+                log_line("Auth", f"Locked {pid} (credentials saved for '{uname or 'owner'}')")
                 self._send_json({"ok": True,
                                  "projects": [public_project(p) for p in projects]})
             except ValueError as ve:
@@ -2252,7 +2546,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             entry.pop("locked", None)
             _drop_project_sessions(pid)
             save_projects(projects)
-            print(f"[Auth] Unlocked {pid}")
+            log_line("Auth", f"Unlocked {pid}")
             self._send_json({"ok": True,
                              "projects": [public_project(p) for p in projects]})
             return
@@ -2274,7 +2568,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
                 return
             save_projects(kept)
-            print(f"[Projects] Deleted {pid}")
+            log_line("Projects", f"Deleted {pid}")
             self._send_json({"ok": True,
                              "projects": [public_project(p) for p in kept]})
             return

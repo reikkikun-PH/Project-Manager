@@ -20,7 +20,7 @@ No dependencies — **stdlib only**, no `pip install` needed.
 
 ```
 Server Project Manager/
-├── server.py          # Main server (ThreadingHTTPServer, ~2000 lines, stdlib only)
+├── server.py          # Main server (ThreadingHTTPServer, ~2600 lines, stdlib only)
 ├── index.html         # HOST•DASHBOARD UI (ProjectFlow theme)
 ├── projects.json      # Project registry [{id, name, type, target, cmd, port...}]
 ├── credentials.json   # Admin accounts [{username, password, role}]
@@ -58,7 +58,7 @@ Server Project Manager/
 
 ## Dashboard (`index.html`)
 
-Dark ProjectFlow UI, mobile-responsive. Admin sign-in dropdown, Add form (name/type/target + Browse server folders + .zip upload + Detect cmd/port), auto-refresh every 15s, live status dots (`online/running/starting/offline/missing/noindex`), Open/Run/Stop/Runner/Lock/Remove per card, HW monitor (CPU/RAM/GPU/HOST).
+Dark ProjectFlow UI, mobile-responsive. Admin sign-in dropdown, search + sort toolbar, Add form (naming modal + .zip upload), auto-refresh every 30s, live status dots (`online/running/starting/offline/missing/noindex`), Open/Run/Stop/Runner/Lock/Remove per card, HW monitor (CPU/RAM/GPU/HOST).
 
 ## How to run (single terminal)
 
