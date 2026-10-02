@@ -884,6 +884,8 @@
           }
         } else if (pending && mine) {
           extra += '<div class="proj-target">Waiting for admin approval — it goes live once approved.</div>';
+        } else if (isSignedIn() && !admin && !mine) {
+          extra += '<div class="proj-target">View only — run, settings and files stay private to the uploader.</div>';
         }
         if (p.type === 'managed' && p.note) {
           extra += '<div class="proj-target">' + esc(p.note) + '</div>';
