@@ -235,6 +235,25 @@
     .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; text-decoration: none; text-align: center; }
     .empty { color: var(--muted); text-align: center; padding: 28px; grid-column: 1 / -1; font-size: 0.8rem; letter-spacing: 2px; }
     .empty .btn { margin-top: 12px; }
+    /* ---------- accounts list (admin only) ---------- */
+    .acct-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px dashed var(--line); flex-wrap: wrap; }
+    .acct-row:first-child { border-top: none; }
+    .acct-name { font-weight: 600; overflow-wrap: anywhere; }
+    .acct-row .btn { padding: 8px 12px; min-height: 40px; font-size: 0.72rem; }
+    /* Tappable checkbox row (44px target) in the delete dialog */
+    .check-row {
+      display: flex; align-items: center; gap: 10px; cursor: pointer;
+      padding: 12px; min-height: 44px; border-radius: 12px;
+      border: 1px solid var(--line); background: #0e1013;
+      font-size: 0.8rem; line-height: 1.4;
+    }
+    .check-row input[type="checkbox"] {
+      width: 20px; height: 20px; min-height: 0; flex-shrink: 0;
+      accent-color: var(--accent); cursor: pointer;
+    }
+    .check-row b { color: var(--text); }
+    .tag.pending { color: var(--amber); border-color: rgba(232, 161, 61, 0.5); }
+    .tag.user { color: var(--green); border-color: rgba(53, 208, 127, 0.5); }
     /* ---------- list toolbar: search + sort (client-side only) ---------- */
     .toolbar { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
     .toolbar input, .toolbar select { flex: 1 1 160px; min-width: 0; }
@@ -354,6 +373,7 @@
       <div class="controls">
         <span id="sessionInfo"></span>
         <button type="button" id="authBtn" class="btn">Sign in</button>
+        <button type="button" id="signupBtn" class="btn">Create account</button>
         <button type="button" id="refreshBtn" class="btn">Refresh</button>
         <section class="card dropdown" id="loginCard" style="display:none;">
           <h2><span class="num">00</span>SIGN IN</h2>
@@ -377,6 +397,7 @@
         <input type="file" id="zipFile" accept=".zip,application/zip" multiple hidden />
       </div>
       <p class="hint">Drop a zip above and it appears below as its own site. Apps start on their own.</p>
+      <p class="hint" id="quotaInfo" style="margin-top:4px;"></p>
       <p class="status" id="formStatus"></p>
     </section>
 
@@ -426,6 +447,13 @@
           <div class="sys-sub" id="sysHostSub">--</div>
         </div>
       </div>
+    </section>
+
+    <section class="card" id="accountsCard" style="display:none; margin-top:16px;">
+      <h2><span class="num">ID</span>ACCOUNTS <span class="live" style="margin-left:10px;" id="pendingBadge" hidden><i></i><span id="pendingCount">0</span>&nbsp;PENDING</span></h2>
+      <div id="acctList"><div class="sys-sub">Loading&hellip;</div></div>
+      <p class="hint">User signups start instantly. Admin signups stay pending until you approve them here.</p>
+      <p class="status" id="acctStatus"></p>
     </section>
 
     <footer class="foot">
@@ -478,12 +506,38 @@
         <div class="modal-path" id="deleteSub"></div>
       </div>
       <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
-        <div class="hint" style="margin:0;">Removes it from the dashboard. Its files stay on the server.</div>
+        <div class="hint" style="margin:0;">Untick to keep the files and only hide it from the dashboard.</div>
+        <label class="check-row" for="deleteFiles">
+          <input type="checkbox" id="deleteFiles" checked />
+          <span>Also delete the project folder from <b>Project List</b> (permanent)</span>
+        </label>
         <p class="status" id="deleteStatus" style="margin:0; min-height:0;"></p>
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" id="deleteCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="deleteConfirm">Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="signupModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong>CREATE ACCOUNT</strong>
+        <div class="modal-path">User accounts start right away. Admin accounts need approval.</div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <input type="text" id="signupUser" placeholder="Username (3-32 chars: letters, numbers, _ or -)" maxlength="32" aria-label="New username" autocomplete="off" />
+        <input type="password" id="signupPass" placeholder="Password (4+ chars)" aria-label="New password" autocomplete="new-password" />
+        <select id="signupRole" aria-label="Requested role">
+          <option value="user">Role: User (instant)</option>
+          <option value="admin">Role: Admin (needs approval)</option>
+        </select>
+        <p class="status" id="signupStatus" style="margin:0; min-height:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="signupCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="signupConfirm">Create</button>
       </div>
     </div>
   </div>
@@ -506,14 +560,40 @@
     const loginBtn = document.getElementById('loginBtn');
     const loginStatus = document.getElementById('loginStatus');
     const manageAdd = document.getElementById('manageAdd');
+    const signupBtn = document.getElementById('signupBtn');
+    const signupModal = document.getElementById('signupModal');
+    const accountsCard = document.getElementById('accountsCard');
     const isAdmin = () => session.role === 'admin';
+    const isSignedIn = () => !!session.username;
 
     function applyAuthUI() {
       const admin = isAdmin();
-      if (sessionInfo) sessionInfo.textContent = admin ? ('Signed in: ' + session.username) : '';
-      if (authBtn) authBtn.textContent = admin ? 'Sign out' : 'Sign in';
-      if (manageAdd) manageAdd.style.display = admin ? '' : 'none';
+      if (sessionInfo) sessionInfo.textContent = isSignedIn()
+        ? ('Signed in: ' + session.username + (session.role ? ' (' + session.role + ')' : ''))
+        : '';
+      if (authBtn) authBtn.textContent = isSignedIn() ? 'Sign out' : 'Sign in';
+      if (signupBtn) signupBtn.style.display = isSignedIn() ? 'none' : '';
+      // Any signed-in account may upload (max 2 each, approval needed);
+      // only admins get the monitor + account approvals.
+      if (manageAdd) manageAdd.style.display = isSignedIn() ? '' : 'none';
+      if (accountsCard) accountsCard.style.display = admin ? '' : 'none';
       if (!admin && loginCard) loginCard.style.display = 'none';
+      updateQuota();
+    }
+
+    function ownProjectCount() {
+      if (!isSignedIn() || isAdmin()) return 0;
+      return allProjects.filter(p => p.owner === session.username).length;
+    }
+
+    function updateQuota() {
+      const el = document.getElementById('quotaInfo');
+      if (!el) return;
+      if (!isSignedIn() || isAdmin()) { el.textContent = ''; return; }
+      const n = ownProjectCount();
+      el.textContent = 'Your projects: ' + n + '/2'
+        + (n >= 2 ? ' — limit reached, remove one to add more.'
+                  : ' — new uploads need admin approval.');
     }
 
     function authDenied() {
@@ -531,7 +611,8 @@
     function unlockScroll() {
       const del = document.getElementById('deleteModal');
       if (lockModal.style.display === 'none' && nameModal.style.display === 'none'
-          && (!del || del.style.display === 'none')) {
+          && (!del || del.style.display === 'none')
+          && (!signupModal || signupModal.style.display === 'none')) {
         document.documentElement.style.overflow = '';
       }
     }
@@ -562,15 +643,18 @@
         const res = await fetchRetry(url);
         const data = await res.json();
         // Server confirms our role; a stale session drops back to public view
-        if (data.role === 'admin' && session.username) {
-          session.role = 'admin';
-        } else {
+        if (session.username && (data.role === 'admin' || data.role === 'user')) {
+          session.role = data.role;
+        } else if (!session.username) {
           session = { username: '', role: '' };
+        } else {
+          session = { username: '', role: '' }; // account removed or deactivated
         }
         applyAuthUI();
         if (sysCard) sysCard.classList.remove('stale');
         renderProjects(data.projects || []);
         fetchSystem();
+        fetchAccounts();
       } catch (e) {
         if (sysStatus) sysStatus.textContent = 'OFFLINE — CHECK BACKEND + TUNNEL';
         if (sysCard) sysCard.classList.add('stale');
@@ -724,6 +808,7 @@
           ? (up + '/' + allProjects.length + ' SYSTEMS OPERATIONAL')
           : 'NO PROJECTS YET';
       }
+      updateQuota();
       if (!allProjects.length) {
         projGrid.innerHTML = '<p class="empty">No projects yet — upload a .zip above and it appears here as its own site.</p>';
         return;
@@ -746,9 +831,11 @@
         const dotClass = (state === 'online' || state === 'running') ? 'online' : (state === 'starting' || state === 'noindex') ? (state === 'noindex' ? 'warn' : 'starting') : (state === 'missing' || state === 'offline') ? state : '';
         const admin = isAdmin();
         const frozen = !!p.locked;
+        const mine = isSignedIn() && !!p.owner && p.owner === session.username;
+        const pending = p.approval === 'pending';
         let mid = '';
         let extra = '';
-        if (admin && !frozen) {
+        if ((admin || mine) && !frozen && !pending) {
           if (p.type === 'managed') {
             mid = (state === 'running' || state === 'starting')
               ? '<button type="button" class="btn" data-act="stop">Stop</button>'
@@ -763,7 +850,14 @@
         }
         let lockRow = '';
         if (admin) {
-          if (frozen) {
+          if (pending) {
+            extra += '<div class="proj-target">Uploaded by ' + esc(p.owner || 'unknown')
+              + ' — approve to make it live, or reject to remove it.</div>';
+            lockRow = '<div class="proj-actions">'
+              + '<button type="button" class="btn btn-primary" data-act="approve">Approve</button>'
+              + '<button type="button" class="btn btn-danger" data-act="reject">Reject</button>'
+              + '</div>';
+          } else if (frozen) {
             extra += '<div class="proj-target">Locked'
               + (p.authUser ? ' by ' + esc(p.authUser) : '')
               + ' &middot; unlock to make changes</div>';
@@ -771,6 +865,8 @@
           } else {
             lockRow = '<div class="proj-actions"><button type="button" class="btn" data-act="protect">Lock</button></div>';
           }
+        } else if (pending && mine) {
+          extra += '<div class="proj-target">Waiting for admin approval — it goes live once approved.</div>';
         }
         if (p.type === 'managed' && p.note) {
           extra += '<div class="proj-target">' + esc(p.note) + '</div>';
@@ -787,15 +883,17 @@
             '<span class="proj-name">' + esc(p.name) + '</span>' +
             '<span class="tag">' + esc(typeLabel) + '</span>' +
             (p.locked ? '<span class="tag lock">Locked</span>' : '') +
+            (pending ? '<span class="tag pending">Awaiting approval</span>' : '') +
+            (admin && p.owner ? '<span class="tag">' + esc(p.owner) + '</span>' : '') +
           '</div>' +
           '<div class="dots"></div>' +
           '<div class="proj-state">STATUS <b>' + esc(stateLabel) + '</b></div>' +
           extra +
           '<div class="proj-url">' + esc(location.origin + p.url) + '</div>' +
           '<div class="proj-actions">' +
-            '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">Open</a>' +
+            (pending ? '' : '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">Open</a>') +
             mid +
-            (admin && !frozen ? '<button type="button" class="btn btn-danger">Remove</button>' : '') +
+            ((admin || mine) && !frozen ? '<button type="button" class="btn btn-danger">Remove</button>' : '') +
           '</div>' +
           lockRow;
         const delBtn = card.querySelector('.btn-danger');
@@ -812,6 +910,10 @@
         if (unlBtn) unlBtn.addEventListener('click', () => unlockProject(p.id, p.name));
         const runnerBtn = card.querySelector('[data-act="runner"]');
         if (runnerBtn) runnerBtn.addEventListener('click', () => installRunner(p.id));
+        const apprBtn = card.querySelector('[data-act="approve"]');
+        if (apprBtn) apprBtn.addEventListener('click', () => reviewProject(p.id, 'approve', apprBtn));
+        const rejBtn = card.querySelector('[data-act="reject"]');
+        if (rejBtn) rejBtn.addEventListener('click', () => reviewProject(p.id, 'reject', rejBtn));
         projGrid.appendChild(card);
       });
     }
@@ -980,7 +1082,7 @@
         const data = await res.json();
         if (data.ok) {
             if (data.projects) renderProjects(data.projects);
-            setStatus('Upload complete — open it from the list below.', true);
+            setStatus(data.message || 'Upload complete — open it from the list below.', true);
           } else {
           setStatus(data.error || 'Upload failed.', false);
           nameStatus.textContent = data.error || 'Upload failed.';
@@ -1086,6 +1188,7 @@
     const deleteSub = document.getElementById('deleteSub');
     const deleteStatus = document.getElementById('deleteStatus');
     const deleteConfirm = document.getElementById('deleteConfirm');
+    const deleteFiles = document.getElementById('deleteFiles');
     let deleteCtx = { id: '' };
 
     function deleteProject(id, name) {
@@ -1095,6 +1198,7 @@
       deleteStatus.className = 'status';
       deleteConfirm.disabled = false;
       deleteConfirm.textContent = 'Remove';
+      if (deleteFiles) deleteFiles.checked = true;
       deleteModal.style.display = '';
       lockScroll();
     }
@@ -1105,6 +1209,7 @@
     }
 
     async function submitDeleteModal() {
+      const wipe = deleteFiles ? deleteFiles.checked : true;
       deleteConfirm.disabled = true;
       deleteConfirm.textContent = 'Removing...';
       deleteConfirm.classList.add('busy');
@@ -1112,12 +1217,12 @@
         const res = await fetch('/api/projects/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: deleteCtx.id, requester: session.username })
+          body: JSON.stringify({ id: deleteCtx.id, requester: session.username, files: wipe })
         });
         const data = await res.json();
         if (data.ok) {
           closeDeleteModal();
-          setStatus('Removed from the dashboard.', true);
+          setStatus(data.message || 'Removed from the dashboard.', true);
           renderProjects(data.projects || []);
         } else {
           deleteStatus.textContent = data.error || 'Failed to remove.';
@@ -1187,11 +1292,203 @@
       fetchProjects();
     }
 
+    // --- Open signup: User starts instantly, Admin waits for approval ---
+    const signupUser = document.getElementById('signupUser');
+    const signupPass = document.getElementById('signupPass');
+    const signupRole = document.getElementById('signupRole');
+    const signupStatus = document.getElementById('signupStatus');
+    const signupConfirm = document.getElementById('signupConfirm');
+
+    function openSignup() {
+      signupUser.value = '';
+      signupPass.value = '';
+      signupRole.value = 'user';
+      signupStatus.textContent = '';
+      signupStatus.className = 'status';
+      signupConfirm.disabled = false;
+      signupConfirm.textContent = 'Create';
+      signupConfirm.classList.remove('busy');
+      signupModal.style.display = '';
+      lockScroll();
+      setTimeout(() => { try { signupUser.focus({ preventScroll: true }); } catch (e) { signupUser.focus(); } }, 50);
+    }
+
+    function closeSignup() {
+      signupModal.style.display = 'none';
+      unlockScroll();
+    }
+
+    async function submitSignup() {
+      const username = signupUser.value.trim();
+      const password = signupPass.value;
+      const role = signupRole.value === 'admin' ? 'admin' : 'user';
+      if (username.length < 3) {
+        signupStatus.textContent = 'Username must be 3+ chars.';
+        signupStatus.className = 'status err';
+        signupUser.focus();
+        return;
+      }
+      if (password.length < 4) {
+        signupStatus.textContent = 'Password must be 4+ chars.';
+        signupStatus.className = 'status err';
+        signupPass.focus();
+        return;
+      }
+      signupConfirm.disabled = true;
+      signupConfirm.textContent = 'Creating...';
+      signupConfirm.classList.add('busy');
+      signupStatus.textContent = '';
+      try {
+        const res = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, role })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          closeSignup();
+          if (data.status === 'pending') {
+            setStatus('Admin request sent — an admin must approve it before you can sign in.', true);
+          } else {
+            loginUser.value = username;
+            setStatus('Account created — sign in below.', true);
+            openLogin();
+          }
+        } else {
+          signupStatus.textContent = data.error || 'Could not create account.';
+          signupStatus.className = 'status err';
+        }
+      } catch (e) {
+        signupStatus.textContent = 'Error connecting to server.';
+        signupStatus.className = 'status err';
+      } finally {
+        signupConfirm.disabled = false;
+        signupConfirm.textContent = 'Create';
+        signupConfirm.classList.remove('busy');
+      }
+    }
+
+    // --- Admin account approvals (pending Admin signups + member list) ---
+    const acctList = document.getElementById('acctList');
+    const acctStatus = document.getElementById('acctStatus');
+    const pendingBadge = document.getElementById('pendingBadge');
+    const pendingCount = document.getElementById('pendingCount');
+
+    function setAcctStatus(msg, ok) {
+      acctStatus.textContent = msg;
+      acctStatus.className = 'status ' + (ok ? 'ok' : 'err');
+    }
+
+    async function fetchAccounts() {
+      if (!accountsCard || !isAdmin()) return;
+      try {
+        const res = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requester: session.username })
+        });
+        const data = await res.json();
+        if (!data.ok) return;
+        renderAccounts(data.accounts || []);
+      } catch (e) { /* keep last list on tunnel hiccup */ }
+    }
+
+    function renderAccounts(accounts) {
+      const pending = accounts.filter(a => a.status === 'pending');
+      if (pendingBadge) pendingBadge.hidden = !pending.length;
+      if (pendingCount) pendingCount.textContent = pending.length;
+      if (!accounts.length) {
+        acctList.innerHTML = '<div class="sys-sub">No accounts.</div>';
+        return;
+      }
+      // Pending first, then by name
+      accounts.sort((a, b) => (a.status === 'pending' ? 0 : 1) - (b.status === 'pending' ? 0 : 1)
+        || String(a.username || '').localeCompare(String(b.username || '')));
+      acctList.innerHTML = '';
+      accounts.forEach(a => {
+        const row = document.createElement('div');
+        row.className = 'acct-row';
+        const isSelf = a.username === session.username;
+        const roleTag = '<span class="tag ' + (a.role === 'admin' ? 'lock' : 'user') + '">' + esc(a.role) + '</span>';
+        const statusTag = a.status === 'pending'
+          ? '<span class="tag pending">Pending</span>'
+          : '<span class="tag">Active</span>';
+        let btns = '';
+        if (a.status === 'pending') {
+          btns = '<button type="button" class="btn btn-primary" data-op="approve">Approve</button>'
+            + '<button type="button" class="btn btn-danger" data-op="remove">Reject</button>';
+        } else if (!isSelf) {
+          btns = '<button type="button" class="btn btn-danger" data-op="remove">Remove</button>';
+        } else {
+          btns = '<span class="sys-sub">(you)</span>';
+        }
+        row.innerHTML = '<span class="acct-name">' + esc(a.username) + '</span>'
+          + roleTag + statusTag
+          + '<span style="margin-left:auto; display:flex; gap:8px;">' + btns + '</span>';
+        const apBtn = row.querySelector('[data-op="approve"]');
+        if (apBtn) apBtn.addEventListener('click', () => reviewAccount(a.username, 'approve', apBtn));
+        const rmBtn = row.querySelector('[data-op="remove"]');
+        if (rmBtn) rmBtn.addEventListener('click', () => reviewAccount(a.username, 'remove', rmBtn));
+        acctList.appendChild(row);
+      });
+    }
+
+    // --- Admin project approvals (pending uploads go live here) ---
+    async function reviewProject(id, op, btn) {
+      if (btn) { btn.disabled = true; }
+      setStatus(op === 'approve' ? 'Approving...' : 'Rejecting...', true);
+      try {
+        const res = await fetch('/api/projects/' + op, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requester: session.username, id })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setStatus(data.message || 'Done.', true);
+          fetchProjects(true);
+        } else {
+          setStatus(data.error || 'Failed.', false);
+          if (btn) { btn.disabled = false; }
+        }
+      } catch (e) {
+        setStatus('Error connecting to server.', false);
+        if (btn) { btn.disabled = false; }
+      }
+    }
+
+    async function reviewAccount(username, op, btn) {
+      if (btn) { btn.disabled = true; }
+      setAcctStatus('', true);
+      try {
+        const res = await fetch('/api/accounts/' + op, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requester: session.username, username })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setAcctStatus(data.message || 'Done.', true);
+          fetchAccounts();
+        } else {
+          setAcctStatus(data.error || 'Failed.', false);
+          if (btn) { btn.disabled = false; }
+        }
+      } catch (e) {
+        setAcctStatus('Error connecting to server.', false);
+        if (btn) { btn.disabled = false; }
+      }
+    }
+
     // --- Drag & drop upload (Drive-style): click opens picker, or drop .zips ---
     // Each zip gets a naming modal; blank input falls back to the zip file name.
     function queueUploads(fileList) {
       const zips = Array.from(fileList || []).filter(f => /\.zip$/i.test(f.name || ''));
       if (!zips.length) { setStatus('Drop a .zip file (or click to choose one).', false); return; }
+      if (!isAdmin() && ownProjectCount() >= 2) {
+        setStatus('Project limit reached (2 per account). Remove one to add more.', false);
+        return;
+      }
       nameQueue = zips;
       askNextName();
     }
@@ -1228,6 +1525,12 @@
     deleteModal.addEventListener('click', e => { if (e.target === deleteModal) closeDeleteModal(); });
     deleteModal.addEventListener('keydown', e => { if (e.key === 'Enter') submitDeleteModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && deleteModal.style.display !== 'none') closeDeleteModal(); });
+    signupBtn.addEventListener('click', openSignup);
+    document.getElementById('signupCancel').addEventListener('click', closeSignup);
+    signupConfirm.addEventListener('click', submitSignup);
+    signupModal.addEventListener('click', e => { if (e.target === signupModal) closeSignup(); });
+    signupPass.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
+    signupUser.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
     // Search + sort redraw the cached list instantly (no server round-trip)
     if (searchInput) searchInput.addEventListener('input', applyView);
     if (sortSelect) sortSelect.addEventListener('change', applyView);
@@ -1251,7 +1554,7 @@
     }
     authBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (isAdmin()) { logout(); return; }
+      if (isSignedIn()) { logout(); return; }
       if (loginCard.style.display === 'none') openLogin();
       else loginCard.style.display = 'none';
     });

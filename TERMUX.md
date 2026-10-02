@@ -90,7 +90,44 @@ python host.py
 * Add sites from the dashboard: **Upload a project** → drop a `.zip`.
 * Stop everything: `Ctrl+C` (volume-down + `C` in Termux).
 
-## 7. Keep it alive in the background
+## 7. Update to a new version
+
+```sh
+cd ~/pm
+sh update-termux.sh
+```
+
+It backs up your state, pulls the new code, checks it parses, and tells you
+to restart. **Your projects and logins are never touched** —
+`Project List/`, `credentials.json`, `project_auth.json` and `cloudflared`
+are all preserved (state files are backed up to `~/.pm-backups/<timestamp>/`
+and restored around the pull).
+
+```
+sh update-termux.sh --check      # just show what's new, change nothing
+sh update-termux.sh --force      # update even if you edited the code
+sh update-termux.sh --no-backup  # skip the backup (not recommended)
+```
+
+Straight from GitHub (if the script is missing):
+
+```sh
+curl -L -o update-termux.sh \
+  https://raw.githubusercontent.com/reikkikun-PH/Project-Manager/main/update-termux.sh
+sh update-termux.sh
+```
+
+Notes:
+
+* Stop the server first (`Ctrl+C`) — a running server keeps the **old** code
+  in memory until you restart it. The script warns you if one is still up.
+* If you edited `server.py` / `index.html` yourself, the script stops rather
+  than overwriting your work. Commit or stash it, or use `--force` to have it
+  stash and re-apply automatically (conflicting lines are shown for you to pick).
+* If the pulled code ever fails to parse, you're told how to roll back with
+  `git reset --hard HEAD~1`.
+
+## 8. Keep it alive in the background
 
 Android kills background apps. In Termux (same or second session):
 
@@ -130,4 +167,5 @@ chmod +x ~/.termux/boot/start-pm.sh
 | Port `8000` busy | `PORT=8001 python host.py` |
 | Tunnel connects slowly | Carrier blocking UDP — wait, it falls back automatically |
 | Termux dies in background | `termux-wake-lock` + Battery Unrestricted (step 7) |
+| Want the newest version | `sh update-termux.sh` (step 7) — stop the server first |
 | Page shows old content | Pull-to-refresh; the dashboard auto-refreshes every 30s |

@@ -45,16 +45,17 @@ Server Project Manager/
 ## Key features in `server.py`
 
 - **Dashboard API:** `GET /api/projects`, `POST /api/projects`, `/api/projects/update|delete|start|stop|runner`, `/api/detect`, `/api/upload`, `/api/browse`, `/api/system`, `/api/login`
-- **ZIP upload:** `POST /api/upload?name=MySite` → extracts zip-slip-safe into `Project List/<slug>/`, strips single top-level folder, auto-detects `index.html` or runnable entry, auto-registers as `static` or `managed`.
-- **Runner detection:** looks for `server.py`, `app.py`, `package.json+start`, `server.js`, else static. Assigned port passed as `PORT` env var.
-- **Managed runner:** free-port pick (8100–8199), detached process, `runner-out.log` / `runner-err.log`, 12s port-poll health check, `taskkill` / `killpg` stop.
+- **ZIP upload:** `POST /api/upload?name=MySite` → extracts zip-slip-safe into `Project List/<slug>/`, strips single top-level folder, auto-detects `index.html` or runnable entry, auto-registers as `static` or `managed`. Any signed-in account may upload (max 2 projects each); admin uploads go live instantly, user uploads wait for admin approval (`/api/projects/approve|reject`). Pending projects are hidden from visitors and return 404 under `/p/` until approved.
+- **Runner detection:** recursive folder walk (skips `node_modules`/`venv`/`.git`) ranking runnable-over-static at the same depth, so an app folder with both `server.py` and `index.html` runs instead of serving statically. Entries: `server.py`, `app.py`, `main.py`, `wsgi.py`, `run.py`, `manage.py` (Django, port baked in), `Procfile` web command, `package.json+start`, `server.js`/`index.js`/`app.js`. Warns when a python entry ignores the `PORT` env var. Double-wrapped zips are unwrapped. Assigned port passed as `PORT` env var.
+- **Managed runner:** free-port pick (8100–8199), auto-installs `requirements.txt` (pip, once per change) or missing `node_modules` (`npm install`) into `runner-out.log`, detached process, `runner-out.log` / `runner-err.log`, 12s port-poll health check, `taskkill` / `killpg` stop.
 - **Standalone runners:** `install_runner()` writes `runner.bat` + `runner.sh` into project folder (python / node / static templates) so each project can run alone on localhost.
 - **Proxy:** forwards GET/POST/PUT/PATCH/DELETE to `127.0.0.1:<port>` with 20s timeout.
 - **System monitor (admin-only):** non-blocking CPU deltas (`/proc/stat`, per-core on Linux; `GetSystemTimes` on Windows), RAM+swap (`/proc/meminfo` or `GlobalMemoryStatusEx`), disk (`shutil.disk_usage`), uptime, GPU (`nvidia-smi` + temp), 5s cache, `GET /api/system`.
 - **Auth:**
-  - Dashboard: public read-only, admin (from `credentials.json`, default `admin/admin123`) required for mutations via `body.requester`.
+  - Dashboard: public read-only list. Accounts: open signup (`Create account`) with roles `user` (instant) and `admin` (stays pending until an active admin approves it in the ACCOUNTS card). Mutations still need an active admin via `body.requester`. No `credentials.json` yet → default `admin/admin123`.
   - Projects: optional lock password (`locked` + `auth.password`) — link stays open, Run/Stop/Runner/Edit/Remove frozen until unlock. Path-scoped cookies `pm_<id>`.
 - **Safety:** `BLOCKED` paths (`/server.py`, `/projects.json`, `/credentials.json`, `/.env`, `/.git`...), path-traversal checks, atomic `projects.json` writes.
+- **Cleanup on delete:** removing a project can also wipe its files — the app is stopped, the top-level `Project List/<folder>` is deleted (read-only bits cleared), and any saved lock credentials + sessions are dropped. Only folders inside `Project List` are ever touched; projects pointing elsewhere keep their files. Rejecting a pending upload cleans up the same way.
 
 ## Dashboard (`index.html`)
 
