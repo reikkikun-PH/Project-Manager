@@ -51,6 +51,45 @@ unless you set your own in `credentials.json`.
   uploads** wait for approval.
 - **Hardware panel** — CPU (with ARM/SoC model), RAM, disk, GPU, uptime.
 
+### Approval e-mails (optional)
+
+When someone requests **admin access** or **approves-pending project upload**, the
+manager can email you so you don't have to keep the dashboard open. It uses the
+[Resend](https://resend.com) HTTP API with the stdlib — no extra packages.
+
+Create `notify.json` next to your state (it is gitignored, so the key is never
+uploaded):
+
+```json
+{
+  "enabled": true,
+  "resendApiKey": "re_...",
+  "to": "you@example.com",
+  "from": "Project Manager <onboarding@resend.dev>"
+}
+```
+
+Or set `RESEND_API_KEY` and `NOTIFY_TO` as environment variables instead.
+
+What gets emailed:
+
+| Trigger | Email |
+|---|---|
+| Signup asking for the **admin** role | username, and where to approve it |
+| A **user's** project upload (waiting for approval) | project name, id, type, owner |
+| A **user** signup | *nothing* — it activates instantly |
+| An **admin** upload | *nothing* — it goes live immediately |
+
+Notes:
+
+- Sending happens in a background thread with a 12s timeout, so a slow or broken mail
+  API never delays an upload; failures are only written to the server log
+  (`[Notify] FAILED: …`).
+- `from` must be a domain you verified in Resend. `onboarding@resend.dev` only works
+  for sending to your own Resend account email — use your own domain for anyone else.
+- For an extra instance, copy `notify.json` into that instance's data folder
+  (`instances/<name>/`) or export the env vars before starting it.
+
 ### Run two managers at once (multi-instance)
 
 Each instance owns its **own projects, logins, folders, app ports and public link** —
@@ -142,6 +181,7 @@ Created at runtime, **never in git**:
 | `projects.json` | Project registry — changes as you use the dashboard |
 | `credentials.json` | Accounts and roles |
 | `project_auth.json` | Per-project lock passwords |
+| `notify.json` | Approval e-mail settings (holds the Resend API key) |
 | `Project List/` | All hosted projects, their logs and databases |
 | `instances/<name>/` | Everything above, for each extra instance |
 | `cloudflared` / `.exe` | Tunnel binary (~90MB) |

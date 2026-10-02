@@ -12,6 +12,8 @@ projects.json
 credentials.json
 project_auth.json
 **/credentials.json
+# Approval e-mail settings (contains the Resend API key) - local only
+notify.json
 
 # Runtime logs / tunnel state
 server-out.log
