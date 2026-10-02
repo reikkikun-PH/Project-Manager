@@ -32,10 +32,55 @@ IS_WINDOWS = os.name == "nt"
 
 PORT = int(os.environ.get("PORT", "8000"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECTS_JSON = os.path.join(BASE_DIR, "projects.json")
 INDEX_HTML = os.path.join(BASE_DIR, "index.html")
-# All uploaded / new project folders live here by default.
-PROJECTS_BASE = os.path.join(BASE_DIR, "Project List")
+
+# --- Instances -------------------------------------------------------------
+# Several independent managers can run side by side on one machine, each with
+# its own projects, logins, folders, app ports and (via host.py) its own tunnel:
+#
+#   PM_INSTANCE=studio PORT=8000 python host.py   # slot 0, ports 8100-8199
+#   PM_INSTANCE=lab    PORT=8010 python host.py   # slot 1, ports 8200-8299
+#
+# Everything that must not be shared lives in DATA_DIR (projects.json,
+# credentials.json, project_auth.json, Project List/). The default instance
+# keeps using the manager folder, so existing installs are untouched.
+INSTANCE = os.environ.get("PM_INSTANCE", "").strip() or "main"
+IS_DEFAULT_INSTANCE = INSTANCE.lower() in ("", "main", "default")
+
+
+def _resolve_slot():
+    """(slot, explicit) from PM_SLOT, else trailing digits in PM_INSTANCE.
+
+    A named instance without an explicit slot would silently share the
+    default 8100-8199 range with the first instance, so we require one."""
+    raw = os.environ.get("PM_SLOT", "").strip()
+    if raw:
+        try:
+            return max(0, int(raw)), True
+        except ValueError:
+            pass
+    digits = "".join(c for c in INSTANCE[::-1] if c.isdigit())
+    if digits:
+        return int(digits[::-1]), True
+    return 0, False
+
+
+SLOT, SLOT_EXPLICIT = _resolve_slot()
+if not IS_DEFAULT_INSTANCE and not SLOT_EXPLICIT:
+    print(f"[ERROR] Instance '{INSTANCE}' needs its own port slot, otherwise it "
+          f"would fight the default instance over app ports 8100-8199.\n"
+          f"        Start it with:  PM_INSTANCE={INSTANCE} PM_SLOT=1 PORT=8010 "
+          f"python host.py\n"
+          f"        (or put a number in the name: PM_INSTANCE={INSTANCE}1)")
+    sys.exit(2)
+DATA_DIR = os.environ.get("PM_DATA_DIR", "").strip() or (
+    BASE_DIR if IS_DEFAULT_INSTANCE
+    else os.path.join(BASE_DIR, "instances", INSTANCE))
+PROJECTS_JSON = os.path.join(DATA_DIR, "projects.json")
+CREDS_PATH = os.path.join(DATA_DIR, "credentials.json")
+AUTH_PATH = os.path.join(DATA_DIR, "project_auth.json")
+# All uploaded / new project folders live here.
+PROJECTS_BASE = os.path.join(DATA_DIR, "Project List")
 try:
     os.makedirs(PROJECTS_BASE, exist_ok=True)
 except OSError:
@@ -47,9 +92,12 @@ BLOCKED = ("/server.py", "/projects.json", "/host.bat", "/projects.example.json"
            "/.env", "/credentials.json", "/project_auth.json", "/config")
 
 # --- Config knobs (all in one place) ---
-# Ports 8100-8199 host managed-app backends; PORT is the manager itself.
-MANAGED_PORT_START = 8100
-MANAGED_PORT_END = 8199
+# Managed-app ports are per instance: slot 0 uses 8100-8199, slot 1 uses
+# 8200-8299, and so on, so two instances can never fight over a port.
+SLOT_WIDTH = 100
+MANAGED_PORT_BASE = int(os.environ.get("PM_PORT_BASE", str(8100 + SLOT * SLOT_WIDTH)))
+MANAGED_PORT_START = MANAGED_PORT_BASE
+MANAGED_PORT_END = MANAGED_PORT_BASE + SLOT_WIDTH - 1
 # Seconds to wait for a managed app's port on start before reporting back.
 START_GRACE_SECS = 12
 # Max raw zip bytes accepted by /api/upload (clear error above this).
@@ -121,7 +169,7 @@ def save_projects(projects):
 # Lock username/password live here - keyed by project id - never inside the
 # project entries in projects.json. Admins set them from the dashboard Lock
 # dialog; opening a locked project and unlocking both ask for them.
-AUTH_PATH = os.path.join(BASE_DIR, "project_auth.json")
+# AUTH_PATH is defined with the other per-instance paths at the top.
 _AUTH_CACHE = {"mtime": 0, "data": {}}
 
 
@@ -177,7 +225,7 @@ def project_creds(proj):
 
 
 # --- Admin auth (public read-only dashboard, admin manages) ---
-CREDS_PATH = os.path.join(BASE_DIR, "credentials.json")
+# CREDS_PATH is defined with the other per-instance paths at the top.
 
 # School-demo default: fresh clones have no credentials.json yet, so they
 # sign in as admin / admin123. Creating credentials.json replaces this
@@ -351,11 +399,15 @@ def find_project(pid):
 
 
 def resolve_static_root(target):
-    """Resolve a static target to an absolute dir, or return None."""
+    """Resolve a static target to an absolute dir, or return None.
+
+    Relative targets ("Project List/demo") resolve against this instance's
+    data dir, so every instance resolves its own folder list.
+    """
     t = (target or "").strip()
     if not t:
         return None
-    cand = t if os.path.isabs(t) else os.path.join(BASE_DIR, t)
+    cand = t if os.path.isabs(t) else os.path.join(DATA_DIR, t)
     root = os.path.normpath(os.path.abspath(cand))
     if os.path.isdir(root):
         return root
@@ -2355,15 +2407,21 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             _acc = find_account(_req_user) if _req_user else None
             _active = _acc is not None and account_status(_acc) == STATUS_ACTIVE
             if _active and account_role(_acc) == ROLE_ADMIN:
-                self._send_json({"projects": projects_for(_acc), "role": "admin"})
+                _list, _role = projects_for(_acc), "admin"
             elif _active:
                 # Signed-in users: active projects + their own pending ones
-                self._send_json({"projects": projects_for(_acc), "role": "user"})
+                _list, _role = projects_for(_acc), "user"
             else:
                 # Logged-out visitors: approved projects only
-                self._send_json({"projects": [public_view(p) for p in load_projects()
-                                              if project_approval(p) == APPROVAL_ACTIVE],
-                                 "role": "visitor"})
+                _list = [public_view(p) for p in load_projects()
+                         if project_approval(p) == APPROVAL_ACTIVE]
+                _role = "visitor"
+            # instance info lets the dashboard label itself and lets a launcher
+            # confirm it reached the instance it intended to (multi-instance).
+            self._send_json({"projects": _list, "role": _role,
+                             "instance": INSTANCE, "slot": SLOT,
+                             "port": PORT,
+                             "appPorts": [MANAGED_PORT_START, MANAGED_PORT_END]})
             return
 
         if path == "/p" or path == "/p/":
@@ -2924,7 +2982,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     if not target:
                         # Default: new empty folder in Project List
                         target = project_list_target(pid)
-                        os.makedirs(os.path.join(BASE_DIR, target), exist_ok=True)
+                        os.makedirs(os.path.join(DATA_DIR, target), exist_ok=True)
                     elif (not os.path.isabs(target)
                           and "/" not in target.replace("\\", "/")
                           and not target.startswith(".")):

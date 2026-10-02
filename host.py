@@ -26,8 +26,35 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "8000"))
 LOCAL_URL = f"http://127.0.0.1:{PORT}"
 ENTRY = os.path.join(BASE_DIR, "server.py")
-TUNNEL_LOG = os.path.join(BASE_DIR, "tunnel.log")
-URL_FILE = os.path.join(BASE_DIR, "tunnel-url.txt")
+# --- Instance identity (multi-instance: see README) ---
+# PM_INSTANCE names the instance; PM_SLOT (or trailing digits in the name)
+# decides its managed-app port range (8100-8199, 8200-8299, ...).
+INSTANCE = os.environ.get("PM_INSTANCE", "").strip() or "main"
+IS_DEFAULT_INSTANCE = INSTANCE.lower() in ("", "main", "default")
+
+
+def _resolve_slot():
+    """(slot, explicit) from PM_SLOT, else trailing digits in PM_INSTANCE."""
+    raw = os.environ.get("PM_SLOT", "").strip()
+    if raw:
+        try:
+            return max(0, int(raw)), True
+        except ValueError:
+            pass
+    digits = "".join(c for c in INSTANCE[::-1] if c.isdigit())
+    if digits:
+        return int(digits[::-1]), True
+    return 0, False
+
+
+SLOT, SLOT_EXPLICIT = _resolve_slot()
+# Per-instance state (projects.json, credentials.json, Project List/, ...).
+DATA_DIR = os.environ.get("PM_DATA_DIR", "").strip() or (
+    BASE_DIR if IS_DEFAULT_INSTANCE
+    else os.path.join(BASE_DIR, "instances", INSTANCE))
+TUNNEL_LOG = os.path.join(BASE_DIR, "tunnel.log" if IS_DEFAULT_INSTANCE
+                         else f"tunnel-{INSTANCE}.log")
+URL_FILE = os.path.join(DATA_DIR, "tunnel-url.txt")
 OUT_LOG = os.path.join(BASE_DIR, "server-out.log")
 ERR_LOG = os.path.join(BASE_DIR, "server-err.log")
 # A real quick tunnel prints a random subdomain like
@@ -147,18 +174,32 @@ def backend_ok():
         return False
 
 
+def backend_instance():
+    """Instance name the backend on our port reports, or '' if unreachable."""
+    try:
+        with urllib.request.urlopen(LOCAL_URL + "/api/projects", timeout=5) as r:
+            import json
+            return str(json.loads(r.read().decode("utf-8")).get("instance", ""))
+    except Exception:
+        return ""
+
+
 def banner(url):
     print("=" * 51, flush=True)
     print("  PUBLIC LINK - pinned, always the latest lines:", flush=True)
     print(f"  {url}", flush=True)
-    print(f"  Local : {LOCAL_URL}", flush=True)
+    print(f"  Local : {LOCAL_URL}")
+    if not IS_DEFAULT_INSTANCE:
+        print(f"  Instance: {INSTANCE} (apps on ports "
+              f"{8100 + SLOT * 100}-{8100 + SLOT * 100 + 99})")
     print(f"  Each project: {url}/p/ID/", flush=True)
-    print("  Full tunnel log: tunnel.log (safe to ignore)", flush=True)
+    print(f"  Full tunnel log: {os.path.basename(TUNNEL_LOG)} (safe to ignore)",
+          flush=True)
     print("=" * 51, flush=True)
-    # Per-project public links (best effort).
+    # Per-project public links (best effort) - read THIS instance's registry.
     try:
         import json
-        with open(os.path.join(BASE_DIR, "projects.json"), encoding="utf-8") as f:
+        with open(os.path.join(DATA_DIR, "projects.json"), encoding="utf-8") as f:
             projects = json.load(f)
         shown = 0
         for p in projects if isinstance(projects, list) else []:
@@ -177,8 +218,27 @@ def banner(url):
 def main():
     print("=" * 51, flush=True)
     print("  Server Project Manager - single terminal host", flush=True)
-    print(f"  Local : {LOCAL_URL}", flush=True)
+    if IS_DEFAULT_INSTANCE:
+        print(f"  Local : {LOCAL_URL}", flush=True)
+    else:
+        print(f"  Local : {LOCAL_URL}   instance: {INSTANCE} (slot {SLOT})",
+              flush=True)
     print("=" * 51, flush=True)
+
+    # Fail fast on the one mistake that silently breaks multi-instance use.
+    if not IS_DEFAULT_INSTANCE and not SLOT_EXPLICIT:
+        log(f"ERROR: instance '{INSTANCE}' needs an explicit port slot.")
+        log(f"       Re-run like this:  PM_INSTANCE={INSTANCE} PM_SLOT=1 "
+            f"PORT=8010 python host.py")
+        log(f"       (or put a number in the name: PM_INSTANCE={INSTANCE}1)")
+        return 2
+
+    # Per-instance state folder (no-op for the default instance).
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except OSError as e:
+        log(f"ERROR: cannot create instance folder {DATA_DIR}: {e}")
+        return 1
 
     cf = find_cloudflared()
     if not cf:
@@ -194,7 +254,17 @@ def main():
 
     backend = None
     if port_open(PORT):
-        log(f"Backend already running on {LOCAL_URL}")
+        # Never attach to someone else's instance by accident: the tunnel and
+        # the project list would belong to a different instance/port pair.
+        running = backend_instance()
+        if running and running.lower() != INSTANCE.lower():
+            log(f"ERROR: port {PORT} is already serving instance '{running}', "
+                f"not '{INSTANCE}'.")
+            log(f"       Give this instance its own port, e.g.  PORT={PORT + 1} "
+                f"PM_INSTANCE={INSTANCE} python host.py")
+            return 1
+        log(f"Backend already running on {LOCAL_URL}"
+            + (f" (instance '{running}')" if running else ""))
     else:
         log("Cleaning old tunnels...")
         clean_stale()
