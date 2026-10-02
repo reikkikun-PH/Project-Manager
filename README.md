@@ -103,6 +103,22 @@ Each account may host **2 projects** (pending ones count). Admins manage everyth
 users manage only their own projects. Pending projects are invisible to visitors and
 return 404 until approved.
 
+### Who sees what
+
+| | Uploader | Admin | Other user | Visitor |
+|---|---|---|---|---|
+| **Open** the project at `/p/<id>/` | yes | yes | yes | yes |
+| Name, type, live status | yes | yes | yes | yes |
+| Folder path, run command, port | **yes** | **yes** | no | no |
+| Run / Stop / Runner / Remove / Lock | **yes** | **yes** | no | no |
+| Runner errors, lock owner | yes | yes | no | no |
+
+A project's configuration is only ever sent to the person who uploaded it and to
+admins — other users (signed in or not) get just the name, type, status and the open
+link, so one student's setup details are never exposed to the class. The API enforces
+this server-side, not just in the UI: other users also get `403` if they try to start,
+stop, edit or delete a project they don't own.
+
 ---
 
 ## Files
@@ -247,7 +263,9 @@ chmod +x ~/.termux/boot/start-pm.sh
 
 ## Security note
 
-Anyone with the link can create a **User** account and queue an **Admin** request.
-Fine for a classroom demo; for anything public, set a real password in
-`credentials.json` first. Lock individual projects with **Lock** to hide their
-Run/Stop/Remove buttons behind a password.
+Anyone with the link can create a **User** account and queue an **Admin** request, and
+anyone can *open* projects that are live. Project configuration (folder path, run
+command, port) is only visible to the uploader and to admins. Fine for a classroom
+demo; for anything public, set a real password in `credentials.json` first. Lock
+individual projects with **Lock** to hide their Run/Stop/Remove buttons behind a
+password.

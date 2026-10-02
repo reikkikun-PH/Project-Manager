@@ -2073,15 +2073,8 @@ def public_view(proj):
 
 
 def owner_view(proj):
-    """Signed-in owner's view: public info + ownership, notes and runnable
-    entry (needed for the Run button) - still no local paths/commands."""
-    full = public_project(proj)
-    out = {k: full.get(k, "") for k in ("id", "name", "type", "url", "status", "locked")}
-    out["owner"] = full.get("owner", "")
-    out["approval"] = full.get("approval", APPROVAL_ACTIVE)
-    out["note"] = full.get("note", "")
-    out["runnable"] = full.get("runnable")
-    return out
+    """Deprecated alias - owners now get the full view of their own project."""
+    return public_project(proj)
 
 
 def project_visible_to(proj, acc):
@@ -2096,15 +2089,26 @@ def project_visible_to(proj, acc):
 
 
 def projects_for(acc):
-    """Dashboard list scoped to the requester (admins see everything)."""
+    """Dashboard list scoped to the requester.
+
+    Configuration - folder path, run command, port, runner notes - is sent
+    ONLY to the uploader and to admins. Everyone else (other signed-in
+    users, visitors) gets the public view: name, type, status and the open
+    link, which stays reachable for the whole dashboard.
+    """
     is_admin = (acc is not None and account_role(acc) == ROLE_ADMIN
                 and account_status(acc) == STATUS_ACTIVE)
+    uname = ((acc.get("username") or "").strip()
+             if isinstance(acc, dict) else "")
     out = []
     for p in load_projects():
-        if is_admin:
+        own = bool(uname) and project_owner(p) == uname
+        if is_admin or own:
+            # Your own project (or any project, for an admin): full details.
             out.append(public_project(p))
-        elif project_visible_to(p, acc):
-            out.append(owner_view(p))
+        elif project_approval(p) == APPROVAL_ACTIVE:
+            # Someone else's live project: link only, no configuration.
+            out.append(public_view(p))
     return out
 
 
@@ -2688,7 +2692,10 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except Exception as e:
-            msg = f"Project offline (port {port}): {e}".encode("utf-8")
+            # Don't leak the project's port/path to other users - the detail
+            # goes to the server log, the browser gets a neutral message.
+            log_line("Proxy", f"{proj.get('id', '')} port {port} unreachable: {e}")
+            msg = b"This project is offline. Ask an admin to start it."
             self.send_response(502)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(msg)))
