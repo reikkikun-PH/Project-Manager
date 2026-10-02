@@ -51,6 +51,45 @@ unless you set your own in `credentials.json`.
   uploads** wait for approval.
 - **Hardware panel** — CPU (with ARM/SoC model), RAM, disk, GPU, uptime.
 
+### Run two managers at once (multi-instance)
+
+Each instance owns its **own projects, logins, folders, app ports and public link** —
+so two unrelated sets of projects get two different links instead of sharing one.
+
+```bat
+REM first (default): manager on 8000, apps on 8100-8199, state in the manager folder
+host.bat
+
+REM second: name + slot + own port, state in instances\<name>\, apps on 8200-8299
+set PM_INSTANCE=lab & set PM_SLOT=1 & set PORT=8010 & py -3 host.py
+```
+
+```sh
+python host.py                                                   # instance "main"
+PM_INSTANCE=lab PM_SLOT=1 PORT=8010 python3 host.py             # second instance
+PM_INSTANCE=lab2 PORT=8020 python3 host.py                      # slot from the name
+```
+
+| Variable | Meaning | Default |
+|----------|---------|---------|
+| `PM_INSTANCE` | Instance name (shown in the dashboard and banner) | `main` |
+| `PM_SLOT` | Port slot: `0` → 8100-8199, `1` → 8200-8299, `2` → 8300-8399 | digits in the name, else `0` |
+| `PM_PORT_BASE` | Override the app port base directly | `8100 + slot × 100` |
+| `PM_DATA_DIR` | Where this instance keeps its state | `instances/<name>/`, or the manager folder for `main` |
+| `PORT` | The manager's own port | `8000` |
+
+Rules that keep instances from colliding:
+
+- A named instance **must** have an explicit slot (`PM_SLOT` or digits in the name) —
+  otherwise the manager refuses to start and tells you the exact command to run.
+- Each instance stores `projects.json`, `credentials.json`, `project_auth.json` and its
+  own `Project List/` in its data dir, so two instances can host projects with the
+  **same name** without overwriting each other.
+- App ports are handed out only inside that instance's 100-port range.
+- Starting on a port already serving a *different* instance is refused, so you never
+  silently attach to the wrong one.
+- Each instance gets its own tunnel link, and its own `tunnel-<name>.log`.
+
 ### Accounts and approvals
 
 | Action | Who | Result |
@@ -88,6 +127,7 @@ Created at runtime, **never in git**:
 | `credentials.json` | Accounts and roles |
 | `project_auth.json` | Per-project lock passwords |
 | `Project List/` | All hosted projects, their logs and databases |
+| `instances/<name>/` | Everything above, for each extra instance |
 | `cloudflared` / `.exe` | Tunnel binary (~90MB) |
 | `*.log`, `tunnel-url.txt` | Backend / runner / tunnel logs, pinned public link |
 

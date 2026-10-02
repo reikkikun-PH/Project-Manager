@@ -368,7 +368,7 @@
           <span id="sysStatus">CONNECTING&hellip;</span>
           <span class="live"><i></i>LIVE</span>
         </div>
-        <div class="sysline" style="margin-top:6px; opacity:0.7;"><span>One address, many projects</span></div>
+        <div class="sysline" style="margin-top:6px; opacity:0.7;"><span id="instanceInfo">One address, many projects</span></div>
       </div>
       <div class="controls">
         <span id="sessionInfo"></span>
@@ -652,6 +652,7 @@
         }
         applyAuthUI();
         if (sysCard) sysCard.classList.remove('stale');
+        renderInstance(data);
         renderProjects(data.projects || []);
         fetchSystem();
         fetchAccounts();
@@ -773,6 +774,22 @@
           (s.ram_total_mb ? (' · RAM ' + fmtGB(s.ram_total_mb) + ' GB') : '') +
           (s.uptime_sec != null ? (' · Up ' + fmtUptime(s.uptime_sec)) : '');
       } catch (e) { /* keep last values on tunnel hiccup */ }
+    }
+
+    // Which manager instance is this? Matters when several run side by side.
+    function renderInstance(data) {
+      const el = document.getElementById('instanceInfo');
+      if (!el) return;
+      const name = data && data.instance;
+      if (!name || String(name).toLowerCase() === 'main') {
+        el.textContent = 'One address, many projects';
+        return;
+      }
+      const range = (data.appPorts || []).join('-');
+      el.textContent = 'Instance "' + name + '"' +
+        (data.port ? ' · port ' + data.port : '') +
+        (range ? ' · app ports ' + range : '') +
+        ' · own projects & link';
     }
 
     function renderProjects(projects) {

@@ -1,5 +1,7 @@
 # Hosted project folders live only on the host PC, never in git
 Project List/
+# Extra instances keep their own state here (see README: multi-instance)
+instances/
 
 # Runtime state - changes every time you add a project or create an account.
 # Kept out of git so `sh termux.sh update` can never clobber your real data.
@@ -15,6 +17,7 @@ project_auth.json
 server-out.log
 server-err.log
 tunnel.log
+tunnel-*.log
 tunnel-url.txt
 runner-out.log
 runner-err.log
