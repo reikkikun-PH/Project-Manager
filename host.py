@@ -30,7 +30,11 @@ TUNNEL_LOG = os.path.join(BASE_DIR, "tunnel.log")
 URL_FILE = os.path.join(BASE_DIR, "tunnel-url.txt")
 OUT_LOG = os.path.join(BASE_DIR, "server-out.log")
 ERR_LOG = os.path.join(BASE_DIR, "server-err.log")
-URL_RE = re.compile(rb"https://[a-z0-9-]+\.trycloudflare\.com")
+# A real quick tunnel prints a random subdomain like
+# https://hungry-apes-shave.trycloudflare.com - never the API host.
+# Match only that shape and never match api.trycloudflare.com, which shows
+# up inside cloudflared's own error text (we used to print it as the link).
+URL_RE = re.compile(rb"https://(?!api\.)([a-z0-9][a-z0-9-]{7,})\.trycloudflare\.com")
 IS_WINDOWS = os.name == "nt"
 
 
@@ -54,6 +58,24 @@ def port_open(port):
     try:
         s = socket.create_connection(("127.0.0.1", port), timeout=1.5)
         s.close()
+        return True
+    except OSError:
+        return False
+
+
+def dns_ready(host="api.trycloudflare.com", timeout=5):
+    """True when the quick-tunnel API host resolves.
+
+    cloudflared reports 'no such host' when DNS is unavailable (offline,
+    captive portal, flaky resolver), so we check up front and say so
+    plainly instead of dying with a raw Go stack of noise.
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        try:
+            socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+        finally:
+            socket.setdefaulttimeout(None)
         return True
     except OSError:
         return False
@@ -198,77 +220,105 @@ def main():
         return 1
     log(f"Backend OK at {LOCAL_URL}")
 
-    # Fresh tunnel log so we never parse a stale link.
-    try:
-        if os.path.exists(TUNNEL_LOG):
-            os.remove(TUNNEL_LOG)
-    except OSError:
-        pass
-    tlog = open(TUNNEL_LOG, "ab")
-    log("Starting tunnel (public link appears below)...")
-    set_title("Starting tunnel... - Server Project Manager")
-    tunnel = subprocess.Popen(
-        [cf, "tunnel", "--url", LOCAL_URL],
-        cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # DNS preflight: cloudflared dies cryptically with 'no such host' when
+    # the resolver is down, so check first and say something useful.
+    if not dns_ready():
+        log("ERROR: cannot resolve api.trycloudflare.com (no working DNS?).")
+        log("       Check your internet connection / VPN, then re-run host.bat.")
+        stop(backend)
+        return 1
 
+    attempts = 3
+    tunnel = None
     url = {"current": None}
-
-    def watch():
-        try:
-            for raw in iter(tunnel.stdout.readline, b""):
-                if not raw:
-                    break
-                try:
-                    tlog.write(raw)
-                    tlog.flush()
-                except OSError:
-                    pass
-                try:
-                    line = raw.decode("utf-8", "replace").strip()
-                except Exception:
-                    continue
-                m = URL_RE.search(raw)
-                if m:
-                    found = m.group(0).decode("ascii")
-                    if found != url["current"]:
-                        url["current"] = found
-                        set_title(f"PUBLIC: {found} - Server Project Manager")
-                        try:
-                            with open(URL_FILE, "w", encoding="utf-8") as f:
-                                f.write(found + "\n")
-                        except OSError:
-                            pass
-                        banner(found)
-                    continue
-                low = line.lower()
-                if "err" in low or "fail" in low or "warn" in low:
-                    print(f"[tunnel] {line}", flush=True)
-        finally:
-            try:
-                tlog.close()
-            except Exception:
-                pass
-
-    t = threading.Thread(target=watch, daemon=True)
-    t.start()
-
     rc = 0
     try:
-        backend_warned = False
-        while tunnel.poll() is None:
-            if backend is not None and backend.poll() is not None and not backend_warned:
-                log(f"WARNING: backend exited (code {backend.returncode}) - see {ERR_LOG}.")
-                backend_warned = True
-            time.sleep(1)
-        log(f"Tunnel exited (code {tunnel.returncode}). Last log lines:")
-        try:
-            with open(TUNNEL_LOG, "rb") as f:
-                tail = f.read().decode("utf-8", "replace").strip().splitlines()[-5:]
-            for line in tail:
-                print(f"[tunnel] {line}", flush=True)
-        except OSError:
-            pass
-        rc = 1
+        for attempt in range(1, attempts + 1):
+            # Fresh tunnel log so we never parse a stale link.
+            try:
+                if os.path.exists(TUNNEL_LOG):
+                    os.remove(TUNNEL_LOG)
+            except OSError:
+                pass
+            tlog = open(TUNNEL_LOG, "ab")
+            log(f"Starting tunnel (attempt {attempt}/{attempts})..."
+                if attempt > 1 else "Starting tunnel (public link appears below)...")
+            set_title("Starting tunnel... - Server Project Manager")
+            tunnel = subprocess.Popen(
+                [cf, "tunnel", "--url", LOCAL_URL],
+                cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            def watch(proc=tunnel, log_file=tlog):
+                try:
+                    for raw in iter(proc.stdout.readline, b""):
+                        if not raw:
+                            break
+                        try:
+                            log_file.write(raw)
+                            log_file.flush()
+                        except OSError:
+                            pass
+                        try:
+                            line = raw.decode("utf-8", "replace").strip()
+                        except Exception:
+                            continue
+                        m = URL_RE.search(raw)
+                        if m:
+                            found = m.group(0).decode("ascii")
+                            if found != url["current"]:
+                                url["current"] = found
+                                set_title(f"PUBLIC: {found} - Server Project Manager")
+                                try:
+                                    with open(URL_FILE, "w", encoding="utf-8") as f:
+                                        f.write(found + "\n")
+                                except OSError:
+                                    pass
+                                banner(found)
+                            continue
+                        low = line.lower()
+                        if "err" in low or "fail" in low or "warn" in low:
+                            print(f"[tunnel] {line}", flush=True)
+                finally:
+                    try:
+                        log_file.close()
+                    except Exception:
+                        pass
+
+            t = threading.Thread(target=watch, daemon=True)
+            t.start()
+
+            backend_warned = False
+            while tunnel.poll() is None:
+                if backend is not None and backend.poll() is not None and not backend_warned:
+                    log(f"WARNING: backend exited (code {backend.returncode}) - see {ERR_LOG}.")
+                    backend_warned = True
+                time.sleep(1)
+
+            # No link ever appeared - worth one more go (flaky DNS/network).
+            if url["current"] is None and attempt < attempts:
+                log(f"Tunnel exited (code {tunnel.returncode}) before publishing a link.")
+                stop(tunnel, name="tunnel")
+                if not dns_ready():
+                    log("DNS still failing - stopping here.")
+                    log("       Check your internet connection / VPN, then re-run.")
+                    rc = 1
+                    break
+                log("Retrying in 5s...")
+                time.sleep(5)
+                continue
+
+            log(f"Tunnel exited (code {tunnel.returncode}). Last log lines:")
+            try:
+                with open(TUNNEL_LOG, "rb") as f:
+                    tail = f.read().decode("utf-8", "replace").strip().splitlines()[-5:]
+                for line in tail:
+                    print(f"[tunnel] {line}", flush=True)
+            except OSError:
+                pass
+            if url["current"] is None:
+                log("ERROR: no public link was ever published (see tunnel.log).")
+                rc = 1
+            break
     except KeyboardInterrupt:
         print("", flush=True)
         log("Stopping (Ctrl+C)...")

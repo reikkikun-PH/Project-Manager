@@ -59,6 +59,7 @@ SYSTEM_CACHE_TTL = 5.0
 # --- Shared message + role constants (single source of truth) ---
 ROLE_ADMIN = "admin"
 ERR_ADMIN_REQUIRED = "Admin sign-in required."
+ERR_SIGNIN_REQUIRED = "Sign-in required."
 ERR_LOCKED = "Project is locked - unlock it first to make changes."
 ERR_UPLOAD_TOO_BIG = (
     "Zip is over 200MB - split it up or host the folder directly.")
@@ -183,24 +184,61 @@ CREDS_PATH = os.path.join(BASE_DIR, "credentials.json")
 DEFAULT_ADMIN = {"username": "admin", "password": "admin123", "role": "admin"}
 _DEFAULT_WARNED = False
 
+# Account roles + lifecycle. "user" accounts activate instantly on signup;
+# "admin" signups stay "pending" until an active admin approves them.
+ROLE_USER = "user"
+VALID_ROLES = (ROLE_USER, ROLE_ADMIN)
+STATUS_ACTIVE = "active"
+STATUS_PENDING = "pending"
+MAX_ACCOUNTS = 50  # signup spam cap (school demo guardrail)
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 
-def load_credentials():
-    """Admin accounts. Falls back to admin/admin123 when unconfigured."""
-    global _DEFAULT_WARNED
+
+def _read_credentials_file():
+    """Raw account list from disk, or None when missing/unreadable."""
     try:
         if os.path.exists(CREDS_PATH):
             with open(CREDS_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list) and any(
                         isinstance(a, dict) and a.get("username") for a in data):
-                    return data
+                    return [a for a in data if isinstance(a, dict)]
     except Exception as e:
         print(f"[Auth] load fail: {e}")
+    return None
+
+
+def load_credentials():
+    """All accounts. Falls back to admin/admin123 when unconfigured."""
+    global _DEFAULT_WARNED
+    data = _read_credentials_file()
+    if data is not None:
+        return data
     if not _DEFAULT_WARNED:
         _DEFAULT_WARNED = True
         print("[Auth] no credentials.json - using default admin/admin123 "
               "(create credentials.json to change it)")
     return [dict(DEFAULT_ADMIN)]
+
+
+def save_credentials(accounts):
+    """Atomic write of the account list (temp + replace)."""
+    tmp = CREDS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(accounts, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CREDS_PATH)
+
+
+def account_status(acc):
+    """active/pending. Old files without status count as active."""
+    s = (acc.get("status") or STATUS_ACTIVE).strip().lower()
+    return STATUS_PENDING if s == STATUS_PENDING else STATUS_ACTIVE
+
+
+def account_role(acc):
+    """user/admin. Old files without role count as admin (as before)."""
+    r = (acc.get("role") or ROLE_ADMIN).strip().lower()
+    return ROLE_ADMIN if r == ROLE_ADMIN else ROLE_USER
 
 
 def find_account(username):
@@ -213,20 +251,80 @@ def find_account(username):
 
 def is_admin_user(username):
     acc = find_account(username) if (username or "").strip() else None
-    return acc is not None and (acc.get("role") or ROLE_ADMIN).strip().lower() == ROLE_ADMIN
+    return (acc is not None and account_role(acc) == ROLE_ADMIN
+            and account_status(acc) == STATUS_ACTIVE)
 
 
 def requester_is_admin(body):
-    """Mutating calls must carry body.requester of an admin account."""
+    """Mutating calls must carry body.requester of an active admin account."""
     req = ((body.get("requester") or "") if isinstance(body, dict) else "").strip()
     if not req:
         return None, ERR_ADMIN_REQUIRED
     acc = find_account(req)
     if acc is None:
         return None, "Unknown account - please sign in again."
-    if (acc.get("role") or ROLE_ADMIN).strip().lower() != ROLE_ADMIN:
+    if account_status(acc) != STATUS_ACTIVE:
+        return None, "Account pending admin approval."
+    if account_role(acc) != ROLE_ADMIN:
         return None, "Admin role required."
     return acc, None
+
+
+# --- Project ownership + approval queue ---
+# Signed-in accounts add projects (max 2 each). Admin uploads go live
+# instantly; everyone else's uploads stay "pending" until an admin
+# approves them. Legacy entries (no owner) count as always-active.
+APPROVAL_ACTIVE = "active"
+APPROVAL_PENDING = "pending"
+MAX_PROJECTS_PER_USER = 2
+
+
+def project_approval(proj):
+    """active/pending. Entries without it count as active."""
+    a = ((proj.get("approval") or APPROVAL_ACTIVE)
+         if isinstance(proj, dict) else APPROVAL_ACTIVE)
+    return APPROVAL_PENDING if str(a).strip().lower() == APPROVAL_PENDING else APPROVAL_ACTIVE
+
+
+def project_owner(proj):
+    """Owner username, or '' for legacy entries."""
+    if not isinstance(proj, dict):
+        return ""
+    return (proj.get("owner") or "").strip()
+
+
+def requester_is_active(body):
+    """Any signed-in active account (user or admin)."""
+    req = ((body.get("requester") or "") if isinstance(body, dict) else "").strip()
+    if not req:
+        return None, ERR_SIGNIN_REQUIRED
+    acc = find_account(req)
+    if acc is None:
+        return None, "Unknown account - please sign in again."
+    if account_status(acc) != STATUS_ACTIVE:
+        return None, "Account pending admin approval."
+    return acc, None
+
+
+def can_manage_project(body, proj):
+    """Admins manage every project; users manage only their own."""
+    acc, err = requester_is_active(body)
+    if err:
+        return None, err
+    if account_role(acc) == ROLE_ADMIN:
+        return acc, None
+    req = (acc.get("username") or "").strip()
+    if proj is not None and project_owner(proj) == req:
+        return acc, None
+    return None, "You can only manage your own projects."
+
+
+def owned_count(username):
+    """Active + pending projects owned by username (quota check)."""
+    uname = (username or "").strip()
+    if not uname:
+        return 0
+    return sum(1 for p in load_projects() if project_owner(p) == uname)
 
 
 def slugify(name):
@@ -282,6 +380,63 @@ def safe_project_dir(pid):
     return cand
 
 
+def project_purge_dir(proj):
+    """Top-level Project List folder to delete for this project, or None.
+
+    Projects can point deeper (./Project List/unievent/prototype), so we
+    return the *top* folder under Project List that holds the target -
+    deleting that clears leftovers too. Returns None when the target lives
+    outside Project List (never delete arbitrary folders on the host) or
+    when it resolves to Project List itself.
+    """
+    root = resolve_static_root(proj.get("target"))
+    if root is None:
+        return None
+    try:
+        rel = os.path.relpath(root, PROJECTS_BASE)
+    except ValueError:
+        return None
+    if rel.startswith("..") or os.path.isabs(rel):
+        return None  # outside Project List - leave it alone
+    parts = rel.replace("\\", "/").split("/")
+    if not parts or not parts[0] or parts[0] == ".":
+        return None  # the whole Project List folder - never delete that
+    return os.path.join(PROJECTS_BASE, parts[0])
+
+
+def _force_rmtree(path):
+    """Delete a directory tree, clearing read-only bits (Windows). Never raises."""
+    def onerror(func, target, _exc):
+        try:
+            os.chmod(target, 0o700)
+            func(target)
+        except OSError:
+            pass
+    import shutil as _sh
+    _sh.rmtree(path, onerror=onerror)
+
+
+def purge_project_files(proj):
+    """Stop the app and delete its Project List folder.
+
+    Returns (deleted, message). Safe by construction: only ever removes a
+    top-level folder inside Project List, never the folder itself and
+    never anything outside it."""
+    pid = proj.get("id", "")
+    stop_managed(pid)  # release file locks before deleting
+    folder = project_purge_dir(proj)
+    if folder is None:
+        return False, " (files kept - project lives outside Project List)"
+    if not os.path.isdir(folder):
+        return False, " (folder already gone)"
+    try:
+        _force_rmtree(folder)
+    except OSError as e:
+        return False, f" (could not delete {os.path.basename(folder)}: {e})"
+    log_line("Projects", f"Purged folder {os.path.basename(folder)} ({pid})")
+    return True, f" - deleted Project List/{os.path.basename(folder)}"
+
+
 def extract_zip_to(data, dest):
     """Extract zip bytes into dest (zip-slip safe). Returns file count."""
     import io
@@ -310,26 +465,31 @@ def extract_zip_to(data, dest):
     return count
 
 
-def _strip_single_root(dest):
-    """If dest contains exactly one subfolder and no files, lift it up."""
-    try:
-        entries = os.listdir(dest)
-    except OSError:
-        return
-    if len(entries) != 1:
-        return
-    inner = os.path.join(dest, entries[0])
-    if not os.path.isdir(inner):
-        return
+def _strip_single_root(dest, max_lifts=3):
+    """Lift single wrapper folders (GitHub zips, double-wrapped zips).
+
+    Repeats while dest contains exactly one subfolder and no files, so
+    Project.zip -> Project/Project/app.py still lands on the app.
+    """
     import shutil
-    tmp = dest + ".__lift__"
-    try:
-        os.rename(inner, tmp)
-        for n in os.listdir(tmp):
-            os.rename(os.path.join(tmp, n), os.path.join(dest, n))
-        os.rmdir(tmp)
-    except OSError:
-        pass
+    for _ in range(max_lifts):
+        try:
+            entries = os.listdir(dest)
+        except OSError:
+            return
+        if len(entries) != 1:
+            return
+        inner = os.path.join(dest, entries[0])
+        if not os.path.isdir(inner):
+            return
+        tmp = dest + ".__lift__"
+        try:
+            os.rename(inner, tmp)
+            for n in os.listdir(tmp):
+                os.rename(os.path.join(tmp, n), os.path.join(dest, n))
+            os.rmdir(tmp)
+        except OSError:
+            return
 
 
 def _dir_files(root):
@@ -339,45 +499,133 @@ def _dir_files(root):
         return set()
 
 
-def find_servable_target(target):
+# Known server entry points, in preference order.
+PYTHON_ENTRIES = ("server.py", "app.py", "main.py", "wsgi.py", "run.py", "manage.py")
+NODE_ENTRIES = ("server.js", "index.js", "app.js", "main.js")
+# Never descend into these when hunting for the app folder.
+SKIP_DIRS = {"node_modules", "venv", ".venv", "env", ".git",
+             "__pycache__", "libs", ".hg", ".svn"}
+
+
+def _procfile_entry(root, files):
+    """Procfile 'web:' command mapped to a local file, or None.
+
+    Covers deploys whose entry isn't a known filename (e.g. a Procfile
+    saying 'web: gunicorn myapp:app' next to myapp.py -> python myapp.py).
+    """
+    if "procfile" not in files:
+        return None
+    try:
+        with open(os.path.join(root, "Procfile"), "r", encoding="utf-8",
+                  errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, _, cmd = line.partition(":")
+        if head.strip().lower() != "web" or not cmd.strip():
+            continue
+        cmd = cmd.strip()
+        m = re.search(r"([\w-]+)\.py\b", cmd)
+        if m and (m.group(1).lower() + ".py") in files:
+            return m.group(1) + ".py"
+        m = re.search(r"\b([A-Za-z_]\w*):app\b", cmd)
+        if m and (m.group(0).split(":")[0].lower() + ".py") in files:
+            return m.group(0).split(":")[0] + ".py"
+        return None  # web command points outside this folder
+    return None
+
+
+def _folder_runner(root, files, port):
+    """Runner suggestion for one folder's file set.
+
+    Returns (cmd, kind) or None. Prefers real backends over static files:
+    a folder with server.py AND index.html is a runnable app, not a site.
+    """
+    for entry in PYTHON_ENTRIES:
+        if entry in files:
+            if entry == "manage.py":
+                # Django doesn't read PORT from the env - bake the assigned
+                # port into the command (re-detect if the port ever changes).
+                return f"python manage.py runserver 0.0.0.0:{port}", "python"
+            return f"python {entry}", "python"
+    prof = _procfile_entry(root, files)
+    if prof:
+        return f"python {prof}", "python"
+    if "package.json" in files:
+        try:
+            with open(os.path.join(root, "package.json"), encoding="utf-8") as f:
+                pkg = json.load(f)
+            scripts = pkg.get("scripts") if isinstance(pkg, dict) else None
+            if isinstance(scripts, dict) and scripts.get("start"):
+                return "npm start", "node"
+        except Exception:
+            pass
+    for entry in NODE_ENTRIES:
+        if entry in files:
+            return f"node {entry}", "node"
+    return None
+
+
+def _uses_port_env(root, entry_file):
+    """True when a python entry reads the PORT env var (or unreadable)."""
+    try:
+        with open(os.path.join(root, entry_file), "r", encoding="utf-8",
+                  errors="replace") as f:
+            head = f.read(32768)
+    except OSError:
+        return True
+    return "PORT" in head
+
+
+def find_servable_target(target, max_depth=3):
     """Best servable sub-target under an uploaded folder.
 
     Returns (target, kind) where kind is 'static' (has index.html),
-    'runnable' (has server entry), or 'empty'. Handles zips whose
-    site lives one level down, e.g. UniEvent.zip -> prototype/index.html.
+    'runnable' (has server entry), or 'empty'. Walks down (skipping
+    junk dirs) and ranks: shallower wins, runnable beats static at the
+    same depth - so an app folder containing both server.py and
+    index.html is detected as runnable, not a static site.
     """
     root = resolve_static_root(target)
     if root is None:
         return target, "empty"
-    files = _dir_files(root)
-    if "index.html" in files or detect_runner(target).get("ok"):
-        return target, ("static" if "index.html" in files else "runnable")
-    # Immediate subfolders first (deterministic order)
-    try:
-        subs = sorted(d for d in os.listdir(root)
-                      if os.path.isdir(os.path.join(root, d)))
-    except OSError:
-        return target, "empty"
-    for d in subs:
-        sub = target.rstrip("/\\") + "/" + d
-        f = _dir_files(os.path.join(root, d))
-        if "index.html" in f:
-            return sub, "static"
-    for d in subs:
-        sub = target.rstrip("/\\") + "/" + d
-        if detect_runner(sub).get("ok"):
-            return sub, "runnable"
-    # Two levels deep for index.html (e.g. dist/site/index.html)
-    for d in subs:
+    base = target.rstrip("/\\")
+    cands = []  # (depth, kind_rank, relpath)
+    queue = [(root, "", 0)]
+    seen = set()
+    while queue:
+        dirpath, rel, depth = queue.pop(0)
+        if dirpath in seen or depth > max_depth:
+            continue
+        seen.add(dirpath)
         try:
-            subs2 = sorted(e for e in os.listdir(os.path.join(root, d))
-                           if os.path.isdir(os.path.join(root, d, e)))
+            entries = os.listdir(dirpath)
         except OSError:
             continue
-        for e in subs2:
-            if "index.html" in _dir_files(os.path.join(root, d, e)):
-                return target.rstrip("/\\") + "/" + d + "/" + e, "static"
-    return target, "empty"
+        files = {e.lower() for e in entries
+                 if os.path.isfile(os.path.join(dirpath, e))}
+        if _folder_runner(dirpath, files, 0) is not None:
+            cands.append((depth, 0, rel))
+        elif "index.html" in files:
+            cands.append((depth, 1, rel))
+        if depth < max_depth:
+            for e in sorted(entries):
+                if e.lower() in SKIP_DIRS:
+                    continue
+                full = os.path.join(dirpath, e)
+                if os.path.isdir(full) and full not in seen:
+                    queue.append((full, (rel + "/" + e) if rel else e, depth + 1))
+    if not cands:
+        return target, "empty"
+    cands.sort()
+    _depth, kind_rank, rel = cands[0]
+    if not rel:
+        return target, ("runnable" if kind_rank == 0 else "static")
+    return base + "/" + rel.replace(os.sep, "/"), ("runnable" if kind_rank == 0 else "static")
 
 
 def port_open(port):
@@ -938,8 +1186,19 @@ def find_python():
 
 
 def free_port(start=MANAGED_PORT_START, end=MANAGED_PORT_END):
+    # Skip ports already assigned to other projects so each project keeps
+    # its own port, then verify the candidate is actually bindable.
+    taken = set()
+    try:
+        for p in load_projects():
+            try:
+                taken.add(int(p.get("port") or 0))
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
     for p in range(start, end + 1):
-        if p == PORT:
+        if p == PORT or p in taken:
             continue
         s = socket.socket()
         try:
@@ -963,35 +1222,32 @@ def detect_runner(path):
         return {"ok": False, "error": str(e)}
     port = free_port() or 8100
     env_note = "The assigned port is passed as the PORT env var - honor it inside the app."
-    if "server.py" in files:
-        return {"ok": True, "cmd": "python server.py", "port": port,
-                "kind": "python", "note": env_note}
-    if "app.py" in files:
-        return {"ok": True, "cmd": "python app.py", "port": port,
-                "kind": "python", "note": env_note}
+    hit = _folder_runner(root, files, port)
+    if hit is not None:
+        cmd, kind = hit
+        if kind == "python":
+            parts = cmd.split()
+            entry = parts[1] if len(parts) > 1 else ""
+            if entry == "manage.py":
+                return {"ok": True, "cmd": cmd, "port": port, "kind": kind,
+                        "note": env_note + " (Django port is baked into the command - re-detect if it changes.)"}
+            if not _uses_port_env(root, entry):
+                return {"ok": True, "cmd": cmd, "port": port, "kind": kind,
+                        "note": env_note + f" Warning: {entry} never mentions PORT - "
+                        "the app may start on its own port instead of "
+                        f"{port}, so Run may report it as not responding."}
+        return {"ok": True, "cmd": cmd, "port": port,
+                "kind": kind, "note": env_note}
     if "package.json" in files:
-        try:
-            with open(os.path.join(root, "package.json"), encoding="utf-8") as f:
-                pkg = json.load(f)
-            scripts = pkg.get("scripts") if isinstance(pkg, dict) else None
-            if isinstance(scripts, dict) and scripts.get("start"):
-                return {"ok": True, "cmd": "npm start", "port": port,
-                        "kind": "node", "note": env_note}
-        except Exception:
-            pass
-        if "server.js" in files:
-            return {"ok": True, "cmd": "node server.js", "port": port,
-                    "kind": "node", "note": env_note}
         return {"ok": False,
                 "error": "package.json has no start script - add one or host as static."}
-    if "server.js" in files:
-        return {"ok": True, "cmd": "node server.js", "port": port,
-                "kind": "node", "note": env_note}
     if "index.html" in files:
         return {"ok": False,
                 "error": "Static site - no runner needed, host it as static."}
     return {"ok": False,
-            "error": "No runnable entry found (server.py, app.py, package.json, server.js)."}
+            "error": "No runnable entry found "
+            "(server.py, app.py, main.py, wsgi.py, run.py, manage.py, "
+            "Procfile, package.json, server.js)."}
 
 
 def _split_cmd(cmd_str):
@@ -1026,6 +1282,88 @@ def _validate_managed(target, cmd, port):
     return root, p
 
 
+def _file_hash(path):
+    """SHA-256 of a file, for change detection. Raises on unreadable files."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _ensure_python_deps(root, py, out_log):
+    """pip install -r requirements.txt when it changed since last install.
+
+    Skipped entirely when the file is unchanged (hash marker .deps-ok) so
+    repeat Runs stay fast. pip output goes to runner-out.log. Times out
+    after 5 minutes instead of hanging the dashboard. Never raises."""
+    req = os.path.join(root, "requirements.txt")
+    if not os.path.isfile(req):
+        return ""
+    try:
+        digest = _file_hash(req)
+    except OSError:
+        return ""
+    marker = os.path.join(root, ".deps-ok")
+    try:
+        if os.path.isfile(marker):
+            with open(marker, "r", encoding="utf-8") as f:
+                if f.read().strip() == digest:
+                    return ""  # already installed, fast path
+    except OSError:
+        pass
+    log_line("Runner", f"installing {req} ...")
+    try:
+        with open(out_log, "ab") as log:
+            log.write((f"\n--- pip install -r requirements.txt "
+                       f"({time.strftime('%Y-%m-%d %H:%M:%S')}) ---\n").encode("utf-8"))
+            log.flush()
+            r = subprocess.run([py, "-m", "pip", "install", "-r", req],
+                               cwd=root, stdout=log,
+                               stderr=subprocess.STDOUT, timeout=300)
+        if r.returncode != 0:
+            return "pip install reported issues - see runner-out.log."
+        try:
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(digest)
+        except OSError:
+            pass
+        return "Dependencies installed from requirements.txt."
+    except subprocess.TimeoutExpired:
+        return "pip install timed out after 5 min - see runner-out.log."
+    except Exception as e:
+        return f"pip install skipped ({e})."
+
+
+def _ensure_node_deps(root, out_log):
+    """npm install when package.json exists but node_modules is missing.
+
+    Same timeout + log behavior as the python counterpart. Never raises."""
+    if not os.path.isfile(os.path.join(root, "package.json")):
+        return ""
+    if os.path.isdir(os.path.join(root, "node_modules")):
+        return ""
+    npm = shutil.which("npm")
+    if not npm:
+        return "npm not found - install Node.js from nodejs.org."
+    log_line("Runner", f"installing node modules in {root} ...")
+    try:
+        with open(out_log, "ab") as log:
+            log.write((f"\n--- npm install "
+                       f"({time.strftime('%Y-%m-%d %H:%M:%S')}) ---\n").encode("utf-8"))
+            log.flush()
+            r = subprocess.run([npm, "install"], cwd=root, stdout=log,
+                               stderr=subprocess.STDOUT, timeout=300)
+        if r.returncode != 0:
+            return "npm install reported issues - see runner-out.log."
+        return "Dependencies installed with npm install."
+    except subprocess.TimeoutExpired:
+        return "npm install timed out after 5 min - see runner-out.log."
+    except Exception as e:
+        return f"npm install skipped ({e})."
+
+
 def _log_tail(path, n=8):
     try:
         with open(path, "rb") as f:
@@ -1049,15 +1387,33 @@ def start_managed(proj):
         _RUNNERS[pid] = {"proc": None, "port": 0, "note": str(ve)}
         return False, str(ve)
     if port_open(port):
-        msg = f"Port {port} is already in use."
-        _RUNNERS[pid] = {"proc": None, "port": port, "note": msg}
-        return False, msg
+        # Another app (or a stale orphan) holds this port. Move this project
+        # to a free one and remember it, so every project keeps its own port
+        # instead of failing with "already in use".
+        alt = free_port()
+        if alt is None:
+            msg = f"Port {port} is already in use and no free port is available."
+            _RUNNERS[pid] = {"proc": None, "port": port, "note": msg}
+            return False, msg
+        log_line("Runner", f"{pid}: port {port} busy - moved to {alt}")
+        try:
+            plist = load_projects()
+            for e in plist:
+                if e.get("id") == pid:
+                    e["port"] = str(alt)
+                    break
+            save_projects(plist)
+        except Exception as e:
+            log_line("Runner", f"{pid}: could not save new port ({e})")
+        proj["port"] = str(alt)
+        port = alt
     parts = _split_cmd(proj.get("cmd") or "")
     if not parts:
         msg = "Empty run command."
         _RUNNERS[pid] = {"proc": None, "port": port, "note": msg}
         return False, msg
-    if parts[0].lower() in PYTHON_LAUNCHERS:
+    is_python = parts[0].lower() in PYTHON_LAUNCHERS
+    if is_python:
         py = find_python()
         if not py:
             msg = "No working python found."
@@ -1069,6 +1425,13 @@ def start_managed(proj):
     out_log = os.path.join(root, "runner-out.log")
     err_log = os.path.join(root, "runner-err.log")
     node_like = parts[0].lower() in ("npm", "npm.cmd", "node", "node.exe", "npx", "npx.cmd")
+    # Auto-install project dependencies (Flask, etc.) so a fresh upload
+    # starts on the first Run instead of dying with ModuleNotFoundError.
+    install_note = ""
+    if is_python:
+        install_note = _ensure_python_deps(root, parts[0], out_log)
+    elif node_like:
+        install_note = _ensure_node_deps(root, out_log)
     try:
         out = open(out_log, "ab")
         err = open(err_log, "ab")
@@ -1103,11 +1466,17 @@ def start_managed(proj):
             return False, msg
         if port_open(port):
             log_line("Runner", f"{pid} running on port {port} (pid {proc.pid})")
-            return True, f"Running on port {port}."
+            done_msg = f"Running on port {port}."
+            if install_note:
+                done_msg += f" {install_note}"
+            return True, done_msg
         time.sleep(0.5)
     _RUNNERS[pid]["note"] = "Started but port not responding yet."
     log_line("Runner", f"{pid} started (pid {proc.pid}), port {port} not answering yet")
-    return True, "Started - waiting for the port."
+    slow_msg = "Started - waiting for the port."
+    if install_note:
+        slow_msg += f" {install_note}"
+    return True, slow_msg
 
 
 def stop_managed(pid):
@@ -1622,6 +1991,8 @@ def public_project(proj):
         "status": project_status(proj),
         "locked": project_locked(proj),
         "authUser": creds.get("username", ""),
+        "owner": project_owner(proj),
+        "approval": project_approval(proj),
     }
     if proj.get("type") == "managed":
         out["cmd"] = proj.get("cmd", "")
@@ -1646,6 +2017,42 @@ def public_view(proj):
     """Reduced project info for logged-out visitors (no local paths/commands)."""
     full = public_project(proj)
     return {k: full.get(k, "") for k in ("id", "name", "type", "url", "status", "locked")}
+
+
+def owner_view(proj):
+    """Signed-in owner's view: public info + ownership, notes and runnable
+    entry (needed for the Run button) - still no local paths/commands."""
+    full = public_project(proj)
+    out = {k: full.get(k, "") for k in ("id", "name", "type", "url", "status", "locked")}
+    out["owner"] = full.get("owner", "")
+    out["approval"] = full.get("approval", APPROVAL_ACTIVE)
+    out["note"] = full.get("note", "")
+    out["runnable"] = full.get("runnable")
+    return out
+
+
+def project_visible_to(proj, acc):
+    """Pending projects are visible to their owner + admins only."""
+    if project_approval(proj) == APPROVAL_ACTIVE:
+        return True
+    if acc is None:
+        return False
+    if account_role(acc) == ROLE_ADMIN:
+        return True
+    return project_owner(proj) == (acc.get("username") or "").strip()
+
+
+def projects_for(acc):
+    """Dashboard list scoped to the requester (admins see everything)."""
+    is_admin = (acc is not None and account_role(acc) == ROLE_ADMIN
+                and account_status(acc) == STATUS_ACTIVE)
+    out = []
+    for p in load_projects():
+        if is_admin:
+            out.append(public_project(p))
+        elif project_visible_to(p, acc):
+            out.append(owner_view(p))
+    return out
 
 
 # --- Per-project owners (path-scoped cookie sessions) ---
@@ -1779,6 +2186,20 @@ def serve_port(proj):
     if proj.get("type") == "managed":
         return int(proj.get("port"))
     return int(proj.get("target"))
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Pass 30x responses through untouched so the manager can rewrite
+    their Location back under /p/<id>/ (urllib would follow them
+    internally and drop the app's cookies on the floor)."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
+# Proxy buffers bodies up to this size so single-threaded backends are
+# freed before slow clients finish; bigger downloads stream instead.
+_PROXY_BUFFER_MAX = 32 * 1024 * 1024
 
 
 class ManagerHandler(SimpleHTTPRequestHandler):
@@ -1930,17 +2351,23 @@ class ManagerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/projects":
             _req_user = _query(self.path).get("username", "")
-            if is_admin_user(_req_user):
-                self._send_json({"projects": [public_project(p) for p in load_projects()],
-                                 "role": "admin"})
+            _acc = find_account(_req_user) if _req_user else None
+            _active = _acc is not None and account_status(_acc) == STATUS_ACTIVE
+            if _active and account_role(_acc) == ROLE_ADMIN:
+                self._send_json({"projects": projects_for(_acc), "role": "admin"})
+            elif _active:
+                # Signed-in users: active projects + their own pending ones
+                self._send_json({"projects": projects_for(_acc), "role": "user"})
             else:
-                # Logged-out visitors: names, status and links only
-                self._send_json({"projects": [public_view(p) for p in load_projects()],
+                # Logged-out visitors: approved projects only
+                self._send_json({"projects": [public_view(p) for p in load_projects()
+                                              if project_approval(p) == APPROVAL_ACTIVE],
                                  "role": "visitor"})
             return
 
         if path == "/p" or path == "/p/":
-            self._send_json({"projects": [public_view(p) for p in load_projects()]})
+            self._send_json({"projects": [public_view(p) for p in load_projects()
+                                          if project_approval(p) == APPROVAL_ACTIVE]})
             return
 
         if path.startswith("/p/"):
@@ -1961,13 +2388,20 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             if proj is None:
                 self.send_error(404, f"Unknown project '{pid}'")
                 return
-            if sub == "login":
+            if project_approval(proj) != APPROVAL_ACTIVE:
+                self.send_error(404, "This project is awaiting admin approval")
+                return
+            # Reserved auth routes apply only to locked projects - otherwise
+            # they belong to the app itself (e.g. a Flask /login page).
+            # Hijacking them here caused an infinite / <-> /login redirect
+            # loop for any app with its own login route.
+            if sub == "login" and project_locked(proj):
                 if project_authorized(proj, self.headers):
                     self._redirect_project_home(pid)
                 else:
                     self._serve_login_page(proj)
                 return
-            if sub == "logout":
+            if sub == "logout" and project_locked(proj):
                 tok = session_token_for(proj, self.headers)
                 if tok:
                     _SESSIONS.pop(tok, None)
@@ -2085,6 +2519,18 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             fh.close()
 
     # ---------- proxy (also serves managed projects on their port) ----------
+    def _rewrite_location(self, pid, port, loc):
+        """Map an upstream redirect target back under /p/<id>/."""
+        if not loc:
+            return loc
+        if loc.startswith("/"):
+            return f"/p/{pid}/" + loc.lstrip("/")
+        low = loc.lower()
+        for host in (f"http://127.0.0.1:{port}/", f"http://localhost:{port}/"):
+            if low.startswith(host):
+                return f"/p/{pid}/" + loc[len(host):]
+        return loc
+
     def _serve_proxy(self, proj, sub, query):
         try:
             port = serve_port(proj)
@@ -2094,6 +2540,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
         if port == PORT:
             self.send_error(502, "Project cannot proxy to the manager itself")
             return
+        pid = proj.get("id", "")
         url = f"http://127.0.0.1:{port}/{quote(sub, safe='/')}"
         if query:
             url += f"?{query}"
@@ -2102,32 +2549,82 @@ class ManagerHandler(SimpleHTTPRequestHandler):
         fwd = urllib.request.Request(url, data=data, method=self.command)
         if self.headers.get("Content-Type"):
             fwd.add_header("Content-Type", self.headers.get("Content-Type"))
+        if self.headers.get("Cookie"):
+            fwd.add_header("Cookie", self.headers.get("Cookie"))
+        # Close the upstream slot immediately: single-threaded dev servers
+        # (Flask/Werkzeug) serialize one connection at a time, so never hold
+        # one open while streaming to a slow tunnel client.
+        fwd.add_header("Connection", "close")
         try:
-            with urllib.request.urlopen(fwd, timeout=20) as r:
+            with _NO_REDIRECT_OPENER.open(fwd, timeout=20) as r:
+                up_len = r.headers.get("Content-Length")
+                try:
+                    declared = int(up_len) if up_len else 0
+                except (TypeError, ValueError):
+                    declared = 0
+                if declared > _PROXY_BUFFER_MAX:
+                    # Huge download: stream it, don't buffer it in RAM.
+                    self.send_response(r.status)
+                    self.send_header("Content-Type",
+                                     r.headers.get("Content-Type") or "application/octet-stream")
+                    self.send_header("Content-Length", str(declared))
+                    loc = self._rewrite_location(pid, port, r.headers.get("Location"))
+                    if loc:
+                        self.send_header("Location", loc)
+                    self._set_cors_headers()
+                    self.end_headers()
+                    shutil.copyfileobj(r, self.wfile)
+                    return
+                # Buffer small bodies fully: frees the backend thread
+                # before a single byte travels to the (slow) client.
+                body = r.read()
+                loc = self._rewrite_location(pid, port, r.headers.get("Location"))
+                headers = r.headers
                 self.send_response(r.status)
                 self.send_header("Content-Type",
-                                 r.headers.get("Content-Type") or "application/octet-stream")
-                up_len = r.headers.get("Content-Length")
-                if up_len:
-                    self.send_header("Content-Length", up_len)
-                    self._set_cors_headers()
-                    self.end_headers()
-                    # Stream upstream -> client, no full-body buffering.
-                    shutil.copyfileobj(r, self.wfile)
-                else:
-                    body = r.read()
-                    self.send_header("Content-Length", str(len(body)))
-                    self._set_cors_headers()
-                    self.end_headers()
+                                 headers.get("Content-Type") or "application/octet-stream")
+                self.send_header("Content-Length", str(len(body)))
+                try:
+                    cookies = headers.get_all("Set-Cookie", []) or []
+                except Exception:
+                    single = headers.get("Set-Cookie")
+                    cookies = [single] if single else []
+                for c in cookies:
+                    self.send_header("Set-Cookie", c)
+                for h in ("Cache-Control", "ETag", "Last-Modified", "Expires"):
+                    v = headers.get(h)
+                    if v:
+                        self.send_header(h, v)
+                if loc:
+                    self.send_header("Location", loc)
+                self._set_cors_headers()
+                self.end_headers()
+                if body:
                     self.wfile.write(body)
         except urllib.error.HTTPError as e:
             try:
                 body = e.read()
             except Exception:
                 body = b""
+            loc = self._rewrite_location(pid, port, e.headers.get("Location") if e.headers else None)
             self.send_response(e.code)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Type",
+                             (e.headers.get("Content-Type") if e.headers else None)
+                             or "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            # Same cookie forwarding as the success path: login redirects
+            # (302 + Set-Cookie) arrive here because redirects are passed
+            # through instead of followed.
+            if e.headers:
+                try:
+                    err_cookies = e.headers.get_all("Set-Cookie", []) or []
+                except Exception:
+                    single = e.headers.get("Set-Cookie")
+                    err_cookies = [single] if single else []
+                for c in err_cookies:
+                    self.send_header("Set-Cookie", c)
+            if loc:
+                self.send_header("Location", loc)
             self._set_cors_headers()
             self.end_headers()
             self.wfile.write(body)
@@ -2163,23 +2660,147 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     matched = a
                     break
             if matched is not None:
-                role = (matched.get("role") or ROLE_ADMIN).strip().lower()
+                if account_status(matched) != STATUS_ACTIVE:
+                    self._send_json({"ok": False,
+                                     "error": "Account pending admin approval."})
+                    return
+                role = account_role(matched)
                 self._send_json({"ok": True, "username": matched.get("username", ""),
                                  "role": role})
             else:
                 self._send_json({"ok": False, "error": "Invalid username or password."})
             return
 
+        if path == "/api/register":
+            # Open signup. "user" activates instantly, "admin" stays pending
+            # until an active admin approves it (see /api/accounts/*).
+            body = self._read_body()
+            username = (body.get("username") or "").strip()
+            password = body.get("password") or ""
+            want_role = (body.get("role") or ROLE_USER).strip().lower()
+            if not USERNAME_RE.match(username):
+                self._send_json({"ok": False, "error":
+                                 "Username must be 3-32 chars (letters, numbers, _ or -)."}, 400)
+                return
+            if len(password) < 4 or len(password) > 128:
+                self._send_json({"ok": False, "error":
+                                 "Password must be 4+ chars."}, 400)
+                return
+            if want_role not in VALID_ROLES:
+                want_role = ROLE_USER
+            accounts = load_credentials()
+            if any((a.get("username") or "") == username for a in accounts):
+                self._send_json({"ok": False, "error": "Username already taken."}, 400)
+                return
+            if len(accounts) >= MAX_ACCOUNTS:
+                self._send_json({"ok": False, "error": "Account limit reached."}, 400)
+                return
+            pending_admin = (want_role == ROLE_ADMIN)
+            accounts.append({"username": username, "password": password,
+                             "role": want_role,
+                             "status": STATUS_PENDING if pending_admin else STATUS_ACTIVE})
+            try:
+                save_credentials(accounts)
+            except OSError as e:
+                self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
+                return
+            log_line("Auth", f"Registered {username} ({want_role}, "
+                     f"{'pending' if pending_admin else 'active'})")
+            if pending_admin:
+                self._send_json({"ok": True, "status": STATUS_PENDING,
+                                 "message": "Admin request sent - wait for approval, then sign in."})
+            else:
+                self._send_json({"ok": True, "status": STATUS_ACTIVE,
+                                 "message": "Account created - sign in."})
+            return
+
+        if path == "/api/accounts":
+            # Admin-only account list (usernames, roles, statuses - no passwords).
+            body = self._read_body()
+            _admin, _err = requester_is_admin(body)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            self._send_json({"ok": True, "accounts": [
+                {"username": a.get("username", ""), "role": account_role(a),
+                 "status": account_status(a)} for a in load_credentials()]})
+            return
+
+        if path == "/api/accounts/approve":
+            # Pending -> active. Only pending entries can be approved.
+            body = self._read_body()
+            _admin, _err = requester_is_admin(body)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            target = (body.get("username") or "").strip()
+            accounts = load_credentials()
+            entry = next((a for a in accounts
+                          if (a.get("username") or "") == target), None)
+            if entry is None:
+                self._send_json({"ok": False, "error": "Unknown account."}, 404)
+                return
+            if account_status(entry) != STATUS_PENDING:
+                self._send_json({"ok": False, "error": "Account is already active."}, 400)
+                return
+            entry["status"] = STATUS_ACTIVE
+            try:
+                save_credentials(accounts)
+            except OSError as e:
+                self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
+                return
+            log_line("Auth", f"Approved {target} ({account_role(entry)})")
+            self._send_json({"ok": True, "message": f"Approved {target}."})
+            return
+
+        if path == "/api/accounts/remove":
+            # Reject pending signups or remove active accounts (not yourself,
+            # never the last active admin - avoids locking everyone out).
+            body = self._read_body()
+            _admin, _err = requester_is_admin(body)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            target = (body.get("username") or "").strip()
+            if target == (_admin.get("username") or ""):
+                self._send_json({"ok": False, "error": "Cannot remove yourself."}, 400)
+                return
+            if _read_credentials_file() is None and target == DEFAULT_ADMIN["username"]:
+                self._send_json({"ok": False, "error": "Cannot remove the default admin."}, 400)
+                return
+            accounts = load_credentials()
+            entry = next((a for a in accounts
+                          if (a.get("username") or "") == target), None)
+            if entry is None:
+                self._send_json({"ok": False, "error": "Unknown account."}, 404)
+                return
+            rest = [a for a in accounts if (a.get("username") or "") != target]
+            if (account_role(entry) == ROLE_ADMIN
+                    and account_status(entry) == STATUS_ACTIVE
+                    and not any(account_role(a) == ROLE_ADMIN
+                                and account_status(a) == STATUS_ACTIVE for a in rest)):
+                self._send_json({"ok": False, "error": "Cannot remove the last admin."}, 400)
+                return
+            try:
+                save_credentials(rest)
+            except OSError as e:
+                self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
+                return
+            log_line("Auth", f"Removed {target}")
+            self._send_json({"ok": True, "message": f"Removed {target}."})
+            return
+
         if path == "/api/upload":
             # Upload a .zip into Project List/<slug>/ and register it as a
-            # project so it is immediately usable under /p/<id>/.
+            # project. Any signed-in account may upload (max 2 projects each);
+            # admin uploads go live instantly, user uploads wait for approval.
             # Raw zip bytes in body, params in query (avoids multipart parsing).
-            # e.g. POST /api/upload?name=MySite&requester=admin&type=auto
+            # e.g. POST /api/upload?name=MySite&requester=ann&type=auto
             _uq = _query(self.path)
             _name = (_uq.get("name", "") or "").strip()
             _req = (_uq.get("requester", "") or "").strip()
             _want = (_uq.get("type", "auto") or "auto").strip().lower()
-            _admin, _err = requester_is_admin({"requester": _req})
+            _uploader, _err = requester_is_active({"requester": _req})
             if _err:
                 # Drain body so the connection stays usable
                 try:
@@ -2187,6 +2808,16 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 except Exception:
                     pass
                 self._send_json({"ok": False, "error": _err}, 403)
+                return
+            _up_is_admin = account_role(_uploader) == ROLE_ADMIN
+            if not _up_is_admin and owned_count(_req) >= MAX_PROJECTS_PER_USER:
+                try:
+                    self._read_raw()
+                except Exception:
+                    pass
+                self._send_json({"ok": False, "error":
+                                 f"Project limit reached ({MAX_PROJECTS_PER_USER} per account). "
+                                 "Remove one to add more."}, 403)
                 return
             if len(_name) < 2 or len(_name) > 48:
                 try:
@@ -2236,7 +2867,9 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             ptype = _want
             if ptype == "auto":
                 ptype = "managed" if runnable else "static"
-            entry = {"id": pid, "name": _name, "type": ptype, "target": target}
+            entry = {"id": pid, "name": _name, "type": ptype, "target": target,
+                     "owner": (_uploader.get("username") or ""),
+                     "approval": APPROVAL_ACTIVE if _up_is_admin else APPROVAL_PENDING}
             msg = ""
             if ptype == "managed":
                 if runnable:
@@ -2252,13 +2885,20 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             projects.append(entry)
             save_projects(projects)
-            log_line("Upload", f"{_name} -> {pid} ({n} files, {ptype}: {target})")
+            log_line("Upload", f"{_name} -> {pid} ({n} files, {ptype}: {target}) "
+                     f"by {_uploader.get('username', '')} ({entry['approval']})")
+            if entry["approval"] == APPROVAL_PENDING:
+                _up_msg = (f"Sent \"{_name}\" for admin approval - "
+                           "it appears below once approved.")
+            else:
+                _up_msg = f"Added \"{_name}\" ({ptype}) under /p/{pid}/.{msg}"
             self._send_json({"ok": True, "id": pid, "target": target,
                              "type": ptype, "files": n, "entries": top,
                              "runnable": runnable,
                              "url": f"/p/{pid}/",
-                             "message": f"Added \"{_name}\" ({ptype}) under /p/{pid}/.{msg}",
-                             "projects": [public_project(p) for p in load_projects()]})
+                             "approval": entry["approval"],
+                             "message": _up_msg,
+                             "projects": projects_for(_uploader)})
             return
 
         if path == "/api/projects":
@@ -2289,7 +2929,9 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                           and not target.startswith(".")):
                         # Bare name -> Project List/<name>
                         target = project_list_target(slugify(target) or pid)
-                entry = {"name": name, "type": ptype, "target": target}
+                entry = {"name": name, "type": ptype, "target": target,
+                         "owner": (_admin.get("username") or ""),
+                         "approval": APPROVAL_ACTIVE}
                 if ptype == "static":
                     if resolve_static_root(target) is None:
                         raise ValueError(
@@ -2313,7 +2955,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 save_projects(projects)
                 log_line("Projects", f"Added {name} -> {pid} ({ptype}: {target})")
                 self._send_json({"ok": True,
-                                 "projects": [public_project(p) for p in projects]})
+                                 "projects": projects_for(_admin)})
             except ValueError as ve:
                 self._send_json({"ok": False, "error": str(ve)}, 400)
             except Exception as e:
@@ -2334,12 +2976,17 @@ class ManagerHandler(SimpleHTTPRequestHandler):
         if path == "/api/projects/update":
             # Edit a project (e.g. convert static -> managed). Restarts nothing:
             # a running managed project is stopped so changes apply on next start.
+            # Admins edit any project; users edit only their own.
             body = self._read_body()
-            _admin, _err = requester_is_admin(body)
+            pid = (body.get("id") or "").strip()
+            _guard = find_project(pid)
+            if _guard is None:
+                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            _who, _err = can_manage_project(body, _guard)
             if _err:
                 self._send_json({"ok": False, "error": _err}, 403)
                 return
-            pid = (body.get("id") or "").strip()
             _lock_err = locked_change_error(pid)
             if _lock_err:
                 self._send_json({"ok": False, "error": _lock_err}, 403)
@@ -2390,7 +3037,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 save_projects(projects)
                 log_line("Projects", f"Updated {pid}")
                 self._send_json({"ok": True,
-                                 "projects": [public_project(p) for p in projects]})
+                                 "projects": projects_for(_who)})
             except ValueError as ve:
                 self._send_json({"ok": False, "error": str(ve)}, 400)
             except Exception as e:
@@ -2399,14 +3046,14 @@ class ManagerHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/projects/start":
             body = self._read_body()
-            _admin, _err = requester_is_admin(body)
-            if _err:
-                self._send_json({"ok": False, "error": _err}, 403)
-                return
             pid = (body.get("id") or "").strip()
             proj = find_project(pid)
             if proj is None:
                 self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            _who, _err = can_manage_project(body, proj)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
                 return
             _lock_err = locked_change_error(pid)
             if _lock_err:
@@ -2419,19 +3066,20 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             ok, msg = start_managed(proj)
             self._send_json({"ok": ok,
                              ("message" if ok else "error"): msg,
-                             "projects": [public_project(p) for p in load_projects()]},
+                             "projects": projects_for(_who)},
                             200 if ok else 500)
             return
 
         if path == "/api/projects/stop":
             body = self._read_body()
-            _admin, _err = requester_is_admin(body)
+            pid = (body.get("id") or "").strip()
+            proj = find_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            _who, _err = can_manage_project(body, proj)
             if _err:
                 self._send_json({"ok": False, "error": _err}, 403)
-                return
-            pid = (body.get("id") or "").strip()
-            if find_project(pid) is None:
-                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
                 return
             _lock_err = locked_change_error(pid)
             if _lock_err:
@@ -2440,17 +3088,21 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             stop_managed(pid)
             log_line("Projects", f"Stopped {pid}")
             self._send_json({"ok": True,
-                             "projects": [public_project(p) for p in load_projects()]})
+                             "projects": projects_for(_who)})
             return
 
         if path == "/api/projects/runner":
             # Generate a standalone localhost runner.bat inside a static project
             body = self._read_body()
-            _admin, _err = requester_is_admin(body)
+            pid = (body.get("id") or "").strip()
+            _guard = find_project(pid)
+            if _guard is None:
+                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            _who, _err = can_manage_project(body, _guard)
             if _err:
                 self._send_json({"ok": False, "error": _err}, 403)
                 return
-            pid = (body.get("id") or "").strip()
             _lock_err = locked_change_error(pid)
             if _lock_err:
                 self._send_json({"ok": False, "error": _lock_err}, 403)
@@ -2466,7 +3118,7 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 entry["runnerPort"] = str(port)
                 save_projects(projects)
                 self._send_json({"ok": True, "message": msg,
-                                 "projects": [public_project(p) for p in projects]})
+                                 "projects": projects_for(_who)})
             except ValueError as ve:
                 self._send_json({"ok": False, "error": str(ve)}, 400)
             except Exception as e:
@@ -2552,6 +3204,49 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/projects/delete":
+            # Admins remove any project; users remove only their own
+            # (frees a slot under the per-account limit).
+            body = self._read_body()
+            pid = (body.get("id") or "").strip()
+            projects = load_projects()
+            target = next((p for p in projects if p.get("id") == pid), None)
+            if target is None:
+                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            _who, _err = can_manage_project(body, target)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            _lock_err = locked_change_error(pid)
+            if _lock_err:
+                self._send_json({"ok": False, "error": _lock_err}, 403)
+                return
+            kept = [p for p in projects if p.get("id") != pid]
+            save_projects(kept)
+            note = ""
+            if body.get("files"):
+                # Stop the app, wipe its Project List folder, and forget any
+                # saved lock credentials/sessions so nothing is left behind.
+                _deleted, note = purge_project_files(target)
+                store = load_project_auth()
+                if pid in store:
+                    store.pop(pid, None)
+                    save_project_auth(store)
+                _drop_project_sessions(pid)
+            log_line("Projects", f"Deleted {pid}{note}")
+            name = target.get("name", pid)
+            if body.get("files"):
+                msg = f'Removed "{name}"{note}.'
+            else:
+                msg = f'Removed "{name}" from the dashboard (files kept).'
+            self._send_json({"ok": True,
+                             "message": msg,
+                             "filesDeleted": bool(note and not note.startswith(" (")),
+                             "projects": projects_for(_who)})
+            return
+
+        if path == "/api/projects/approve":
+            # Pending -> live. Admin only.
             body = self._read_body()
             _admin, _err = requester_is_admin(body)
             if _err:
@@ -2559,18 +3254,46 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             pid = (body.get("id") or "").strip()
             projects = load_projects()
-            _lock_err = locked_change_error(pid)
-            if _lock_err:
-                self._send_json({"ok": False, "error": _lock_err}, 403)
-                return
-            kept = [p for p in projects if p.get("id") != pid]
-            if len(kept) == len(projects):
+            entry = next((p for p in projects if p.get("id") == pid), None)
+            if entry is None:
                 self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
                 return
-            save_projects(kept)
-            log_line("Projects", f"Deleted {pid}")
+            if project_approval(entry) != APPROVAL_PENDING:
+                self._send_json({"ok": False, "error": "Project is already live."}, 400)
+                return
+            entry["approval"] = APPROVAL_ACTIVE
+            save_projects(projects)
+            log_line("Projects", f"Approved {pid} (owner {project_owner(entry) or 'legacy'})")
+            self._send_json({"ok": True, "message": f"Approved \"{entry.get('name', pid)}\"."})
+            return
+
+        if path == "/api/projects/reject":
+            # Reject a pending upload: drop the registry entry and its
+            # Project List folder (nothing was ever live for it to lose).
+            # Admin only; live projects use /api/projects/delete instead.
+            body = self._read_body()
+            _admin, _err = requester_is_admin(body)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            pid = (body.get("id") or "").strip()
+            projects = load_projects()
+            entry = next((p for p in projects if p.get("id") == pid), None)
+            if entry is None:
+                self._send_json({"ok": False, "error": f"Unknown project '{pid}'."}, 404)
+                return
+            if project_approval(entry) != APPROVAL_PENDING:
+                self._send_json({"ok": False, "error": "Only pending projects can be rejected."}, 400)
+                return
+            save_projects([p for p in projects if p.get("id") != pid])
+            _deleted, note = purge_project_files(entry)
+            store = load_project_auth()
+            if pid in store:
+                store.pop(pid, None)
+                save_project_auth(store)
+            log_line("Projects", f"Rejected {pid} (owner {project_owner(entry) or 'legacy'}){note}")
             self._send_json({"ok": True,
-                             "projects": [public_project(p) for p in kept]})
+                             "message": f'Rejected "{entry.get("name", pid)}"{note}.'})
             return
 
         self.send_error(404, "Endpoint not found")
@@ -2588,7 +3311,12 @@ class ManagerHandler(SimpleHTTPRequestHandler):
         if proj is None:
             self.send_error(404, f"Unknown project '{pid}'")
             return
-        if sub == "login":
+        if project_approval(proj) != APPROVAL_ACTIVE:
+            self.send_error(404, "This project is awaiting admin approval")
+            return
+        # Same as GET: the login route belongs to the app itself unless
+        # the project is locked by an admin.
+        if sub == "login" and project_locked(proj):
             if self.command == "POST":
                 self._project_login(proj)
             else:
