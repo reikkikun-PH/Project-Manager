@@ -72,7 +72,8 @@ cloudflared --version
 
 ```sh
 cp credentials.example.json credentials.json
-nano credentials.json   # change "CHANGE_ME_BEFORE_HOSTING" to your password
+# Default login is admin / admin123 (change the password inside
+# credentials.json if you host anything public).
 ```
 
 ## 6. Run it (single terminal)

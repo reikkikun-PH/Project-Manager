@@ -102,8 +102,7 @@ elif [ -n "${ADMIN_PASS:-}" ]; then
   say "Admin login created from ADMIN_PASS."
 else
   cp ./credentials.example.json ./credentials.json
-  say "Copied credentials.example.json -> credentials.json."
-  say "EDIT IT NOW: nano credentials.json  (change CHANGE_ME_BEFORE_HOSTING)"
+  say "Copied credentials.example.json -> credentials.json (login: admin / admin123)."
 fi
 
 chmod +x ./host.sh 2>/dev/null || true

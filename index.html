@@ -26,6 +26,13 @@
       --dot: "DotGothic16", "IBM Plex Mono", ui-monospace, monospace;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body { overflow-x: hidden; }
+    button, a, .dropzone, input, select {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    img, svg { max-width: 100%; }
     body {
       color: var(--text);
       font-family: var(--mono);
@@ -227,6 +234,22 @@
     .proj-actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
     .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; text-decoration: none; text-align: center; }
     .empty { color: var(--muted); text-align: center; padding: 28px; grid-column: 1 / -1; font-size: 0.8rem; letter-spacing: 2px; }
+    .empty .btn { margin-top: 12px; }
+    /* ---------- list toolbar: search + sort (client-side only) ---------- */
+    .toolbar { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .toolbar input, .toolbar select { flex: 1 1 160px; min-width: 0; }
+    .toolbar select { flex: 0 1 170px; cursor: pointer; }
+    /* Stale hardware monitor (connection failed, values may be old) */
+    #sysCard.stale { opacity: 0.55; }
+    /* Busy button spinner (upload / modal submits) */
+    .btn.busy { position: relative; pointer-events: none; opacity: 0.8; }
+    .btn.busy::after {
+      content: ""; width: 14px; height: 14px; margin-left: 8px; vertical-align: -2px;
+      display: inline-block; border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ---------- system monitor ---------- */
     .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
@@ -257,10 +280,61 @@
     .modal-path { font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; margin-top: 6px; font-family: var(--mono); letter-spacing: 0; }
     .modal-foot { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
     .modal-foot .btn { flex: 1; }
+    /* ---------- touch: kill sticky hover lift, keep press feedback ---------- */
+    @media (hover: none), (pointer: coarse) {
+      .proj:hover, .dropzone:hover { transform: none; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5); }
+      .btn:hover { box-shadow: none; }
+      .btn:active { transform: scale(0.98); }
+      .btn, .proj-actions .btn, .drop-pill { min-height: 48px; }
+    }
+    /* ---------- mobile ---------- */
     @media (max-width: 640px) {
-      body { padding: 18px 10px calc(18px + env(safe-area-inset-bottom)); }
+      body { padding: 16px 10px calc(20px + env(safe-area-inset-bottom)); }
+      .wrap { max-width: 100%; }
       .login-grid { grid-template-columns: 1fr; }
-      header.top { align-items: flex-start; flex-direction: column; }
+      header.top { align-items: stretch; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+      .brand h1 { font-size: clamp(1.5rem, 8vw, 1.9rem); letter-spacing: 3px; overflow-wrap: break-word; }
+      .brand small { letter-spacing: 3px; }
+      .sysline { flex-wrap: wrap; font-size: 0.74rem; letter-spacing: 1px; }
+      .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+      #sessionInfo { grid-column: 1 / -1; min-height: 0; overflow-wrap: anywhere; }
+      .controls .btn { width: 100%; padding: 12px 10px; font-size: 0.74rem; }
+      /* Sign-in becomes a full-width inline panel on phones: no clipping, no overlap */
+      #loginCard.dropdown { position: static; width: 100%; grid-column: 1 / -1; }
+      #loginCard .btn { width: 100%; }
+      /* Prevent iOS auto-zoom on focus (>=16px) */
+      input, select { font-size: 16px; }
+      .card { padding: 16px 14px; }
+      .card h2 { font-size: 0.95rem; letter-spacing: 2px; }
+      .dropzone { padding: 22px 14px 18px; }
+      .dropzone .cloud { width: 40px; height: 40px; }
+      .drop-pill { width: 100%; justify-content: center; text-align: center; }
+      /* One column, never overflow 320px screens */
+      .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+      .proj { padding: 15px 14px; }
+      .proj-head { flex-wrap: wrap; row-gap: 8px; }
+      .proj-name { flex: 1 1 100%; order: 3; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .tag { margin-left: 0; }
+      .tag:first-of-type { margin-left: auto; }
+      /* Big thumb-friendly 2-col action grid instead of 4 squeezed in a row */
+      .proj-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .proj-actions .btn { flex: none; padding: 12px 8px; font-size: 0.74rem; }
+      .proj-actions .btn:only-child { grid-column: 1 / -1; }
+      .proj-url { word-break: break-all; }
+      .sys-grid { grid-template-columns: minmax(0, 1fr); }
+      .sys-val { font-size: 1.5rem; }
+      footer.foot { font-size: 0.64rem; letter-spacing: 2px; }
+      /* Bottom-sheet modals: reachable, keyboard-safe, scrollable */
+      .modal-overlay { align-items: flex-end; padding: 0; }
+      .modal { width: 100%; max-width: 100%; max-height: 92dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; border-radius: 18px 18px 0 0; }
+      .modal-foot { position: sticky; bottom: 0; background: var(--card2); padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+      .modal-foot .btn { min-height: 48px; }
+    }
+    @media (max-width: 380px) {
+      .brand h1 { letter-spacing: 2px; }
+      .controls { grid-template-columns: 1fr; }
+      .proj-actions { grid-template-columns: 1fr; }
+      .count { font-size: 0.7rem; letter-spacing: 2px; }
     }
   </style>
 </head>
@@ -307,6 +381,14 @@
     </section>
 
     <p class="count" id="projCount"></p>
+    <div class="toolbar" id="listToolbar">
+      <input type="search" id="searchInput" placeholder="Search projects..." aria-label="Search projects" maxlength="64" autocomplete="off" />
+      <select id="sortSelect" aria-label="Sort projects">
+        <option value="name">Sort: Name A–Z</option>
+        <option value="status">Sort: Status (live first)</option>
+        <option value="recent">Sort: Recently added</option>
+      </select>
+    </div>
     <div class="grid" id="projGrid" style="margin-top:10px;"></div>
 
     <section class="card" id="sysCard" style="display:none; margin-top:16px;">
@@ -389,6 +471,23 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="deleteModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong>REMOVE PROJECT</strong>
+        <div class="modal-path" id="deleteSub"></div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <div class="hint" style="margin:0;">Removes it from the dashboard. Its files stay on the server.</div>
+        <p class="status" id="deleteStatus" style="margin:0; min-height:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="deleteCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="deleteConfirm">Remove</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const formStatus = document.getElementById('formStatus');
     const dropzone = document.getElementById('dropzone');
@@ -427,6 +526,16 @@
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // Mobile: lock background scroll while a modal sheet is open
+    function lockScroll() { document.documentElement.style.overflow = 'hidden'; }
+    function unlockScroll() {
+      const del = document.getElementById('deleteModal');
+      if (lockModal.style.display === 'none' && nameModal.style.display === 'none'
+          && (!del || del.style.display === 'none')) {
+        document.documentElement.style.overflow = '';
+      }
+    }
+
     // One automatic retry: tunnel/origin hiccups fail single fetches
     // even when the server is healthy.
     async function fetchRetry(url, opts) {
@@ -437,6 +546,12 @@
         return await fetch(url, opts);
       }
     }
+
+    // Client-side list state: search + sort filter the cached fetch.
+    // No backend change needed - renderProjects() caches, applyView() draws.
+    let allProjects = [];
+    const searchInput = document.getElementById('searchInput');
+    const sortSelect = document.getElementById('sortSelect');
 
     async function fetchProjects(quiet) {
       if (!quiet) projGrid.innerHTML = '<p class="empty">Loading projects...</p>';
@@ -453,11 +568,13 @@
           session = { username: '', role: '' };
         }
         applyAuthUI();
+        if (sysCard) sysCard.classList.remove('stale');
         renderProjects(data.projects || []);
         fetchSystem();
       } catch (e) {
         if (sysStatus) sysStatus.textContent = 'OFFLINE — CHECK BACKEND + TUNNEL';
-        if (!quiet) projGrid.innerHTML = '<p class="empty">Error connecting to server. Check the backend + tunnel windows, then press Refresh.</p>';
+        if (sysCard) sysCard.classList.add('stale');
+        if (!quiet) projGrid.innerHTML = '<p class="empty">Error connecting to server. Check the backend + tunnel windows, then press Refresh.<br /><button type="button" class="btn" onclick="fetchProjects()">Retry</button></p>';
       }
     }
 
@@ -492,14 +609,17 @@
         // CPU (delta since last probe; first call primes and reads N/A)
         const cpuT = document.getElementById('sysCpuPct');
         const cpuB = document.getElementById('sysCpuBar');
+        var cpuMeta = (s.cpu_count || '--') + ' cores'
+          + (s.cpu_arch ? ' · ' + s.cpu_arch : '');
+        if (s.cpu_temp_c != null) cpuMeta += ' · ' + s.cpu_temp_c.toFixed(0) + '°C';
+        if (s.cpu_model && s.cpu_model !== s.cpu_arch) cpuMeta += ' · ' + s.cpu_model;
         if (s.cpu_percent == null) {
           cpuT.textContent = 'N/A';
-          document.getElementById('sysCpuSub').textContent = (s.cpu_count || '--') + ' cores · measuring...';
+          document.getElementById('sysCpuSub').textContent = cpuMeta + ' · measuring...';
         } else {
           cpuT.textContent = s.cpu_percent.toFixed(1);
           cpuB.style.width = Math.min(100, s.cpu_percent) + '%';
-          document.getElementById('sysCpuSub').textContent = (s.cpu_count || '--') + ' cores'
-            + (s.cpu_temp_c != null ? ' · ' + s.cpu_temp_c.toFixed(0) + '°C' : '');
+          document.getElementById('sysCpuSub').textContent = cpuMeta;
         }
         document.getElementById('sysCpuCount').textContent = s.cpu_count ? ('×' + s.cpu_count) : '';
         // Per-core mini bars (Linux; empty elsewhere)
@@ -562,27 +682,60 @@
           });
         }
         // Host
-        document.getElementById('sysHost').textContent = s.platform || '--';
+        document.getElementById('sysHost').textContent =
+          (s.platform || '--') + (s.cpu_arch ? ' ' + s.cpu_arch : '');
         document.getElementById('sysHostSub').textContent = 'CPU ×' + (s.cpu_count || '?') +
+          (s.cpu_model ? ' ' + s.cpu_model : '') +
           (s.ram_total_mb ? (' · RAM ' + fmtGB(s.ram_total_mb) + ' GB') : '') +
           (s.uptime_sec != null ? (' · Up ' + fmtUptime(s.uptime_sec)) : '');
       } catch (e) { /* keep last values on tunnel hiccup */ }
     }
 
     function renderProjects(projects) {
-      projCount.textContent = projects.length === 1 ? '01 PROJECT' : String(projects.length).padStart(2, '0') + ' PROJECTS';
-      const up = projects.filter(p => p.status === 'online' || p.status === 'running').length;
+      allProjects = Array.isArray(projects) ? projects : [];
+      applyView();
+    }
+
+    // Live-first rank for status sort (running beats stopped beats broken)
+    function statusRank(s) {
+      if (s === 'online' || s === 'running') return 0;
+      if (s === 'starting') return 1;
+      if (s === 'stopped' || s === 'offline') return 2;
+      return 3; // missing / noindex / unknown
+    }
+
+    function applyView() {
+      const q = (searchInput && searchInput.value || '').trim().toLowerCase();
+      const mode = (sortSelect && sortSelect.value) || 'name';
+      let list = allProjects.slice();
+      if (q) list = list.filter(p => ((p.name || '') + ' ' + (p.id || '')).toLowerCase().includes(q));
+      if (mode === 'status') {
+        list.sort((a, b) => statusRank(a.status) - statusRank(b.status)
+          || String(a.name || '').localeCompare(String(b.name || '')));
+      } else if (mode === 'recent') {
+        list = list.reverse();
+      } else {
+        list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+      }
+      projCount.textContent = allProjects.length === 1 ? '01 PROJECT' : String(allProjects.length).padStart(2, '0') + ' PROJECTS';
+      const up = allProjects.filter(p => p.status === 'online' || p.status === 'running').length;
       if (sysStatus) {
-        sysStatus.textContent = projects.length
-          ? (up + '/' + projects.length + ' SYSTEMS OPERATIONAL')
+        sysStatus.textContent = allProjects.length
+          ? (up + '/' + allProjects.length + ' SYSTEMS OPERATIONAL')
           : 'NO PROJECTS YET';
       }
-      if (!projects.length) {
-        projGrid.innerHTML = '<p class="empty">No projects yet — upload one above.</p>';
+      if (!allProjects.length) {
+        projGrid.innerHTML = '<p class="empty">No projects yet — upload a .zip above and it appears here as its own site.</p>';
+        return;
+      }
+      if (!list.length) {
+        projGrid.innerHTML = '<p class="empty">No matches for "' + esc(q) + '".<br /><button type="button" class="btn" id="clearSearchBtn">Clear search</button></p>';
+        const clr = document.getElementById('clearSearchBtn');
+        if (clr) clr.addEventListener('click', () => { searchInput.value = ''; applyView(); });
         return;
       }
       projGrid.innerHTML = '';
-      projects.forEach((p, i) => {
+      list.forEach((p, i) => {
         const card = document.createElement('div');
         card.className = 'proj';
         const num = String(i + 1).padStart(2, '0');
@@ -621,6 +774,11 @@
         }
         if (p.type === 'managed' && p.note) {
           extra += '<div class="proj-target">' + esc(p.note) + '</div>';
+        }
+        if (state === 'noindex') {
+          extra += '<div class="proj-target">Folder has no index.html — add one to show the site.</div>';
+        } else if (state === 'missing') {
+          extra += '<div class="proj-target">Folder not found on the server — re-upload the zip.</div>';
         }
         card.innerHTML =
           '<div class="proj-head">' +
@@ -787,12 +945,14 @@
       nameConfirm.disabled = false;
       nameConfirm.textContent = 'Upload';
       nameModal.style.display = '';
-      nameInput.focus();
+      lockScroll();
+      setTimeout(() => { try { nameInput.focus({ preventScroll: true }); } catch (e) { nameInput.focus(); } }, 50);
     }
 
     function closeNameModal() {
       nameModal.style.display = 'none';
       nameQueue = [];
+      unlockScroll();
     }
 
     async function submitNameModal() {
@@ -807,7 +967,10 @@
       }
       nameConfirm.disabled = true;
       nameConfirm.textContent = 'Uploading...';
-      nameStatus.textContent = 'Uploading "' + name + '"...';
+      nameConfirm.classList.add('busy');
+      nameInput.disabled = true;
+      document.getElementById('nameCancel').disabled = true;
+      nameStatus.textContent = 'Uploading "' + name + '"... (keep this tab open)';
       nameStatus.className = 'status';
       try {
         const url = '/api/upload?name=' + encodeURIComponent(name)
@@ -824,6 +987,9 @@
           nameStatus.className = 'status err';
           nameConfirm.disabled = false;
           nameConfirm.textContent = 'Upload';
+          nameConfirm.classList.remove('busy');
+          nameInput.disabled = false;
+          document.getElementById('nameCancel').disabled = false;
           return;
         }
       } catch (e) {
@@ -832,13 +998,20 @@
         nameStatus.className = 'status err';
         nameConfirm.disabled = false;
         nameConfirm.textContent = 'Upload';
+        nameConfirm.classList.remove('busy');
+        nameInput.disabled = false;
+        document.getElementById('nameCancel').disabled = false;
         return;
       }
+      nameConfirm.classList.remove('busy');
+      nameInput.disabled = false;
+      document.getElementById('nameCancel').disabled = false;
       nameQueue.shift();
       if (nameQueue.length) {
         askNextName();
       } else {
         nameModal.style.display = 'none';
+        unlockScroll();
         setTimeout(() => fetchProjects(true), 2000);
       }
     }
@@ -863,10 +1036,11 @@
         lockConfirm.textContent = 'Lock';
       }
       lockModal.style.display = '';
-      (unlock ? lockPass : lockUser).focus();
+      lockScroll();
+      setTimeout(() => { try { (unlock ? lockPass : lockUser).focus({ preventScroll: true }); } catch (e) { (unlock ? lockPass : lockUser).focus(); } }, 50);
     }
 
-    function closeLockModal() { lockModal.style.display = 'none'; }
+    function closeLockModal() { lockModal.style.display = 'none'; unlockScroll(); }
 
     async function submitLockModal() {
       const pw = lockPass.value;
@@ -906,19 +1080,56 @@
       }
     }
 
-    async function deleteProject(id, name) {
-      if (!confirm('Remove "' + name + '" from the dashboard? Its files stay on the server.')) return;
+    // Remove uses the same bottom-sheet modal pattern as lock/unlock
+    // (no native confirm popups, which behave poorly on mobile).
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteSub = document.getElementById('deleteSub');
+    const deleteStatus = document.getElementById('deleteStatus');
+    const deleteConfirm = document.getElementById('deleteConfirm');
+    let deleteCtx = { id: '' };
+
+    function deleteProject(id, name) {
+      deleteCtx = { id };
+      deleteSub.textContent = name;
+      deleteStatus.textContent = '';
+      deleteStatus.className = 'status';
+      deleteConfirm.disabled = false;
+      deleteConfirm.textContent = 'Remove';
+      deleteModal.style.display = '';
+      lockScroll();
+    }
+
+    function closeDeleteModal() {
+      deleteModal.style.display = 'none';
+      unlockScroll();
+    }
+
+    async function submitDeleteModal() {
+      deleteConfirm.disabled = true;
+      deleteConfirm.textContent = 'Removing...';
+      deleteConfirm.classList.add('busy');
       try {
         const res = await fetch('/api/projects/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, requester: session.username })
+          body: JSON.stringify({ id: deleteCtx.id, requester: session.username })
         });
         const data = await res.json();
-        if (data.ok) renderProjects(data.projects || []);
-        else setStatus(data.error || 'Failed to remove.', false);
+        if (data.ok) {
+          closeDeleteModal();
+          setStatus('Removed from the dashboard.', true);
+          renderProjects(data.projects || []);
+        } else {
+          deleteStatus.textContent = data.error || 'Failed to remove.';
+          deleteStatus.className = 'status err';
+        }
       } catch (e) {
-        setStatus('Error connecting to server.', false);
+        deleteStatus.textContent = 'Error connecting to server.';
+        deleteStatus.className = 'status err';
+      } finally {
+        deleteConfirm.disabled = false;
+        deleteConfirm.textContent = 'Remove';
+        deleteConfirm.classList.remove('busy');
       }
     }
 
@@ -1012,6 +1223,14 @@
     nameConfirm.addEventListener('click', submitNameModal);
     nameModal.addEventListener('click', e => { if (e.target === nameModal) closeNameModal(); });
     nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitNameModal(); if (e.key === 'Escape') closeNameModal(); });
+    document.getElementById('deleteCancel').addEventListener('click', closeDeleteModal);
+    deleteConfirm.addEventListener('click', submitDeleteModal);
+    deleteModal.addEventListener('click', e => { if (e.target === deleteModal) closeDeleteModal(); });
+    deleteModal.addEventListener('keydown', e => { if (e.key === 'Enter') submitDeleteModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && deleteModal.style.display !== 'none') closeDeleteModal(); });
+    // Search + sort redraw the cached list instantly (no server round-trip)
+    if (searchInput) searchInput.addEventListener('input', applyView);
+    if (sortSelect) sortSelect.addEventListener('change', applyView);
 
     document.getElementById('refreshBtn').addEventListener('click', () => fetchProjects());
     document.getElementById('lockCancel').addEventListener('click', closeLockModal);
@@ -1027,7 +1246,8 @@
       loginCard.classList.remove('drop-in');
       void loginCard.offsetWidth; // restart the animation
       loginCard.classList.add('drop-in');
-      loginUser.focus();
+      try { loginUser.focus({ preventScroll: true }); } catch (e) { loginUser.focus(); }
+      try { loginCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
     }
     authBtn.addEventListener('click', (e) => {
       e.stopPropagation();
