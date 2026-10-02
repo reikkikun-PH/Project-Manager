@@ -1,11 +1,12 @@
 """Server Project Manager - host many projects on one address.
 
 Dashboard at / lets you add projects:
-  - static: serve a local folder (e.g. ./projects/demo)
-  - proxy:  forward to an app already running on a local port
+  - static:  serve a local folder (e.g. ./Project List/demo)
+  - managed: the manager launches it (python server.py, npm start, ...)
+  - proxy:   forward to an app already running on a local port
 
 Every project is then reachable under /p/<id>/ on this same host,
-so one Cloudflare tunnel (host.bat) exposes all of them.
+so one Cloudflare tunnel (host.py / host.bat) exposes all of them.
 Stdlib only - no pip install needed.
 """
 import os
@@ -42,7 +43,7 @@ except OSError:
 
 VALID_TYPES = ("static", "proxy", "managed")
 # Never serve these, even over the tunnel
-BLOCKED = ("/server.py", "/projects.json", "/host.bat", "/host.sh",
+BLOCKED = ("/server.py", "/projects.json", "/host.bat", "/projects.example.json",
            "/.env", "/credentials.json", "/project_auth.json", "/config")
 
 # --- Config knobs (all in one place) ---
@@ -1148,7 +1149,7 @@ _START_GRACE = START_GRACE_SECS  # seconds to wait for the port on start
 
 
 def find_python():
-    """Cross-platform python pick, mirroring host.bat / host.sh order."""
+    """Cross-platform python pick, mirroring host.bat order."""
     global _PYTHON
     if _PYTHON:
         return _PYTHON
