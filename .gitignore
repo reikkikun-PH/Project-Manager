@@ -21,7 +21,7 @@ runner-err.log
 *.log
 logs8101.json
 
-# Cloudflared binaries (~90MB) - download per read.md, not stored in git
+# Cloudflared binaries (~90MB) - download per README.md, not stored in git
 cloudflared
 cloudflared.exe
 
