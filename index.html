@@ -295,6 +295,22 @@
     .gpu-row { padding: 10px 0; border-top: 1px dashed var(--line); }
     .gpu-row:first-child { border-top: none; }
     .gpu-name { font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text); overflow-wrap: anywhere; }
+    /* ---------- per-project resource usage ---------- */
+    .usage {
+      font-size: 0.68rem; letter-spacing: 0.4px; color: #a9a08d;
+      line-height: 1.75; overflow-wrap: anywhere;
+    }
+    .usage b { color: var(--accent); font-weight: 600; }
+    .usage .sep { opacity: 0.4; padding: 0 5px; }
+    .usage-bar {
+      display: inline-block; width: 52px; height: 5px; border-radius: 3px;
+      background: #05070a; border: 1px solid var(--line); vertical-align: 1px;
+      margin-right: 5px; overflow: hidden;
+    }
+    .usage-bar i {
+      display: block; height: 100%;
+      background: linear-gradient(90deg, #e23c10, #ff7a3d);
+    }
     footer.foot {
       margin-top: 26px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
       font-size: 0.72rem; font-weight: 500; letter-spacing: 3px; color: rgba(250, 246, 236, 0.8); text-transform: uppercase;
@@ -459,6 +475,7 @@
           <div class="sys-label">HOST</div>
           <div class="sys-val" style="font-size:1.1rem;" id="sysHost">--</div>
           <div class="sys-sub" id="sysHostSub">--</div>
+          <div class="usage" id="projTotals" style="margin-top:8px;"></div>
         </div>
       </div>
     </section>
@@ -596,6 +613,34 @@
       if (accountsCard) accountsCard.style.display = admin ? '' : 'none';
       if (!admin && loginCard) loginCard.style.display = 'none';
       updateQuota();
+      updateUsageTotals();
+    }
+
+    // Aggregate across every project the requester can see usage for.
+    function updateUsageTotals() {
+      const el = document.getElementById('projTotals');
+      if (!el) return;
+      let ram = 0, cpuSum = 0, disk = 0, files = 0, running = 0, seen = 0;
+      allProjects.forEach(p => {
+        const u = p.usage;
+        if (!u) return;
+        seen++;
+        if (u.proc && u.proc.pid) {
+          running++;
+          ram += u.proc.rssMb || 0;
+          cpuSum += u.proc.cpu || 0;
+        }
+        disk += ((u.disk && u.disk.bytes) || 0) / 1048576;
+        files += (u.disk && u.disk.files) || 0;
+      });
+      if (!seen) { el.textContent = ''; return; }
+      el.innerHTML = [
+        running + ' app' + (running === 1 ? '' : 's') + ' running',
+        'RAM <b>' + fmtBytes(ram) + '</b>',
+        'CPU <b>' + cpuSum.toFixed(1) + '%</b>',
+        'disk <b>' + fmtBytes(disk) + '</b>',
+        fmtCount(files) + ' files'
+      ].join('<span class="sep">&middot;</span>');
     }
 
     function ownProjectCount() {
@@ -834,6 +879,57 @@
       }
     }
 
+    // Per-project resource usage line (owner/admin only - the API withholds
+    // it from everyone else). RAM bar is scaled against a 1 GB reference so
+    // big projects visibly stand out without needing a tooltip.
+    function fmtBytes(mb) {
+      if (mb == null) return '--';
+      if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+      if (mb >= 1) return mb.toFixed(1) + ' MB';
+      return Math.max(0, Math.round(mb * 1024)) + ' KB';
+    }
+
+    function fmtCount(n) {
+      return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    function usageLine(p) {
+      const u = p.usage || {};
+      const d = u.disk || {};
+      const proc = u.proc || null;
+      const bits = [];
+      if (proc && proc.pid) {
+        const cpu = proc.cpu == null ? null : proc.cpu;
+        const bar = cpu == null ? '' :
+          '<span class="usage-bar"><i style="width:' + Math.min(100, cpu / 8).toFixed(1) + '%"></i></span>';
+        bits.push('CPU ' + (cpu == null ? 'measuring' : '<b>' + cpu.toFixed(1) + '%</b>'));
+        if (cpu != null) bits[0] = bar + bits[0];
+        if (proc.rssMb != null) bits.push('RAM <b>' + fmtBytes(proc.rssMb) + '</b>');
+        if (proc.upSec != null) bits.push('up ' + fmtUptime(proc.upSec));
+        if (p.port) bits.push('port ' + esc(String(p.port)));
+      } else if (p.status === 'stopped') {
+        bits.push('not running');
+      }
+      if (d.files != null) {
+        bits.push('disk <b>' + fmtBytes((d.bytes || 0) / 1048576) + '</b>');
+        bits.push(fmtCount(d.files) + ' files');
+        if (d.dirs) bits.push(fmtCount(d.dirs) + ' dirs');
+        if (d.truncated) bits.push('partial');
+      }
+      if (u.logsMb) {
+        const logBits = Object.keys(u.logsMb).map(k =>
+          k.replace('runner-', '') + ' ' + fmtBytes(u.logsMb[k]));
+        if (logBits.length) bits.push('logs ' + logBits.join(' + '));
+      }
+      if (!bits.length) return '';
+      let out = '<div class="usage">' + bits.join('<span class="sep">&middot;</span>') + '</div>';
+      if (d.largest && d.largest.length) {
+        const names = d.largest.map(f => esc(f.name) + ' (' + fmtBytes(f.mb) + ')');
+        out += '<div class="usage">largest: ' + names.join(', ') + '</div>';
+      }
+      return out;
+    }
+
     function renderProjects(projects) {
       allProjects = Array.isArray(projects) ? projects : [];
       applyView();
@@ -936,6 +1032,9 @@
           extra += '<div class="proj-target">Folder has no index.html — add one to show the site.</div>';
         } else if (state === 'missing') {
           extra += '<div class="proj-target">Folder not found on the server — re-upload the zip.</div>';
+        }
+        if ((admin || mine) && p.usage) {
+          extra += usageLine(p);
         }
         card.innerHTML =
           '<div class="proj-head">' +

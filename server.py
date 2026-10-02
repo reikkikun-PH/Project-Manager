@@ -1742,6 +1742,7 @@ def start_managed(proj):
         _RUNNERS[pid] = {"proc": None, "port": port, "note": msg}
         return False, msg
     _RUNNERS[pid] = {"proc": proc, "port": port, "note": ""}
+    _PROC_START[proc.pid] = time.time()  # real uptime baseline for the dashboard
     deadline = time.time() + _START_GRACE
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -2239,6 +2240,207 @@ def runner_state(pid):
         return "stopped", ""
 
 
+# --- Per-project resource usage -------------------------------------------
+# Managed apps: CPU% / RAM / uptime for their process. Static projects: how
+# much disk their folder uses. Purely informational, best effort, and never
+# allowed to raise - it rides along on the dashboard poll.
+_PROC_SAMPLE = {}   # os pid -> {"cpu": seconds, "at": epoch}
+_USAGE_CACHE = {}   # project id -> {"at": epoch, "data": dict}
+_USAGE_TTL = 20.0   # seconds; CPU% needs two samples to have a delta
+_FOLDER_WALK_CAP = 40000  # files counted before we stop (huge model dirs)
+_FOLDER_WALK_SECS = 4.0
+
+
+def _proc_cpu_seconds(pid):
+    """Total CPU seconds for a process, or None. Windows + Linux."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return None
+            try:
+                FILETIME = wintypes.FILETIME
+                creation, exit_, ktime, utime = (FILETIME(), FILETIME(),
+                                                 FILETIME(), FILETIME())
+                ok = ctypes.windll.kernel32.GetProcessTimes(
+                    h, ctypes.byref(creation), ctypes.byref(exit_),
+                    ctypes.byref(ktime), ctypes.byref(utime))
+
+                def secs(ft):
+                    return (ft.dwHighDateTime << 32 | ft.dwLowDateTime) / 1e7
+                return secs(ktime) + secs(utime) if ok else None
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        # /proc/<pid>/stat: utime and stime are fields 14 and 15 (1-based)
+        with open(f"/proc/{int(pid)}/stat", "rb") as f:
+            raw = f.read().decode("utf-8", "replace")
+        # comm can contain spaces/parens - split after the last ')'
+        rest = raw[raw.rfind(")") + 1:].split()
+        ticks = int(rest[11]) + int(rest[12])
+        return ticks / float(os.sysconf("SC_CLK_TCK"))
+    except Exception:
+        return None
+
+
+def _proc_rss_mb(pid):
+    """Resident memory in MB, or None. Windows + Linux."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class PMC(ctypes.Structure):
+                _fields_ = [("cb", wintypes.DWORD),
+                            ("PageFaultCount", wintypes.DWORD),
+                            ("PeakWorkingSetSize", ctypes.c_size_t),
+                            ("WorkingSetSize", ctypes.c_size_t),
+                            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                            ("PagefileUsage", ctypes.c_size_t),
+                            ("PeakPagefileUsage", ctypes.c_size_t)]
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not h:
+                return None
+            try:
+                c = PMC()
+                c.cb = ctypes.sizeof(PMC)
+                if ctypes.windll.psapi.GetProcessMemoryInfo(
+                        h, ctypes.byref(c), c.cb):
+                    return c.WorkingSetSize / (1024 * 1024)
+                return None
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return None
+    try:
+        with open(f"/proc/{int(pid)}/statm", "r") as f:
+            pages = int(f.read().split()[1])
+        return pages * os.sysconf("SC_PAGE_SIZE") / (1024 * 1024)
+    except Exception:
+        return None
+
+
+def managed_usage(pid):
+    """CPU% / RAM / uptime for a running managed app. Never raises."""
+    out = {"pid": 0, "cpu": None, "rssMb": None, "upSec": None}
+    try:
+        r = _RUNNERS.get(pid)
+        proc = (r or {}).get("proc")
+        if proc is None or proc.poll() is not None:
+            return out
+        os_pid = proc.pid
+        out["pid"] = os_pid
+        out["upSec"] = max(0, int(time.time() - _PROC_START.get(os_pid, time.time())))
+        out["rssMb"] = _proc_rss_mb(os_pid)
+        total = _proc_cpu_seconds(os_pid)
+        if total is not None:
+            key = os_pid
+            now = time.time()
+            prev = _PROC_SAMPLE.get(key)
+            if prev and now > prev["at"]:
+                span = now - prev["at"]
+                pct = 100.0 * (total - prev["cpu"]) / span
+                # Clamp: a single process can't exceed 100% per core, but with
+                # threads it can - cap at a sane 8x so one spike can't wreck
+                # the dashboard.
+                out["cpu"] = round(max(0.0, min(800.0, pct)), 1)
+            _PROC_SAMPLE[key] = {"cpu": total, "at": now}
+    except Exception:
+        pass
+    return out
+
+
+_PROC_START = {}  # os pid -> first seen epoch (for uptime)
+
+
+def folder_usage(path):
+    """Disk usage of a project folder: bytes, file count, biggest files.
+
+    Walks with caps (file count + wall time) so a folder full of model
+    weights can't stall a dashboard refresh. Cached per project for
+    _USAGE_TTL seconds. Never raises."""
+    if not path:
+        return {"bytes": 0, "files": 0, "dirs": 0, "largest": []}
+    now = time.time()
+    key = path
+    hit = _USAGE_CACHE.get(key)
+    if hit and now - hit["at"] < _USAGE_TTL:
+        return hit["data"]
+    data = {"bytes": 0, "files": 0, "dirs": 0, "largest": [],
+            "truncated": False}
+    try:
+        deadline = now + _FOLDER_WALK_SECS
+        biggest = []
+        for root, dirs, files in os.walk(path):
+            if time.time() > deadline or data["files"] > _FOLDER_WALK_CAP:
+                data["truncated"] = True
+                break
+            data["dirs"] += len(dirs)
+            for name in files:
+                full = os.path.join(root, name)
+                try:
+                    size = os.path.getsize(full)
+                except OSError:
+                    continue
+                data["files"] += 1
+                data["bytes"] += size
+                if len(biggest) < 3:
+                    biggest.append((size, name))
+                    biggest.sort(reverse=True)
+                elif size > biggest[-1][0]:
+                    biggest[-1] = (size, name)
+                    biggest.sort(reverse=True)
+        data["largest"] = [{"name": n, "mb": round(s / 1048576, 2)}
+                           for s, n in biggest]
+    except Exception:
+        pass
+    _USAGE_CACHE[key] = {"at": now, "data": data}
+    return data
+
+
+def project_usage(proj):
+    """Combined per-project usage for the dashboard (owner/admin only).
+
+    Managed -> process CPU/RAM/uptime. Everything -> folder disk usage."""
+    out = {}
+    try:
+        pid = proj.get("id", "")
+        root = resolve_static_root(proj.get("target"))
+        out["disk"] = folder_usage(root)
+        if proj.get("type") == "managed":
+            proc_usage = managed_usage(pid)
+            if proc_usage.get("pid"):
+                out["proc"] = proc_usage
+        # Managed apps also keep logs next to the project - worth knowing.
+        if root:
+            logs = {}
+            for name in ("runner-out.log", "runner-err.log"):
+                p = os.path.join(root, name)
+                try:
+                    if os.path.isfile(p):
+                        logs[name] = round(os.path.getsize(p) / 1048576, 2)
+                except OSError:
+                    pass
+            if logs:
+                out["logsMb"] = logs
+    except Exception:
+        pass
+    return out
+
+
 def project_status(proj):
     """Live status for the dashboard. No exceptions escape."""
     try:
@@ -2296,6 +2498,9 @@ def public_project(proj):
             or os.path.isfile(os.path.join(root, "runner.sh"))))
         out["runnerPort"] = proj.get("runnerPort", "")
     out["lockPass"] = bool(creds.get("password"))
+    # Resource usage rides on this view, which only owners and admins receive,
+    # so it never leaks CPU/RAM/pid details to other users or visitors.
+    out["usage"] = project_usage(proj)
     return out
 
 
@@ -2727,6 +2932,11 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             else:
                 self._serve_proxy(proj, sub, parsed.query)
             return
+
+        # Any other GET path: answer 404 instead of falling through and closing
+        # the socket silently - a browser or a tunnel then sees a clean error
+        # rather than an opaque "connection reset".
+        self.send_error(404, "Not found")
 
     def _redirect_project_home(self, pid):
         self.send_response(302)
