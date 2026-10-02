@@ -326,7 +326,7 @@ def main():
         stop(tunnel, name="tunnel")
         stop(backend, name="backend")  # None-safe; only kills what we started
         set_title("Server Project Manager - stopped")
-        log("Bye. Re-run host.py (or host.bat / host.sh) to share again.")
+        log("Bye. Re-run host.py (or host.bat on Windows) to share again.")
     return rc
 
 

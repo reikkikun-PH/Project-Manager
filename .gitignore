@@ -1,7 +1,12 @@
 # Hosted project folders live only on the host PC, never in git
 Project List/
 
-# Secrets - never commit real credentials (see credentials.example.json)
+# Runtime state - changes every time you add a project or create an account.
+# Kept out of git so `sh termux.sh update` can never clobber your real data.
+# A fresh clone starts empty (or copy projects.example.json to get the samples).
+projects.json
+
+# Secrets - never commit real logins or lock passwords
 credentials.json
 project_auth.json
 **/credentials.json
