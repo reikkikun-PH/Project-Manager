@@ -304,12 +304,15 @@ def main():
     rc = 0
     try:
         for attempt in range(1, attempts + 1):
-            # Fresh tunnel log so we never parse a stale link.
-            try:
-                if os.path.exists(TUNNEL_LOG):
-                    os.remove(TUNNEL_LOG)
-            except OSError:
-                pass
+            # Fresh tunnel log so we never parse a stale link, and drop the
+            # old session link so the dashboard/e-mails never advertise a dead
+            # URL while the new tunnel is still coming up.
+            for stale in (TUNNEL_LOG, URL_FILE):
+                try:
+                    if os.path.exists(stale):
+                        os.remove(stale)
+                except OSError:
+                    pass
             tlog = open(TUNNEL_LOG, "ab")
             log(f"Starting tunnel (attempt {attempt}/{attempts})..."
                 if attempt > 1 else "Starting tunnel (public link appears below)...")
@@ -395,6 +398,13 @@ def main():
     finally:
         stop(tunnel, name="tunnel")
         stop(backend, name="backend")  # None-safe; only kills what we started
+        # The tunnel is gone, so its link is dead: drop the file rather than
+        # let the dashboard and approval e-mails share a URL that 404s.
+        try:
+            if os.path.exists(URL_FILE):
+                os.remove(URL_FILE)
+        except OSError:
+            pass
         set_title("Server Project Manager - stopped")
         log("Bye. Re-run host.py (or host.bat on Windows) to share again.")
     return rc

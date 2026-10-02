@@ -87,6 +87,16 @@
       background: var(--accent); box-shadow: 0 0 8px var(--accent);
       animation: blink 1.4s infinite;
     }
+    /* Live public tunnel link (this session) */
+    .session-line { font-size: 0.74rem; letter-spacing: 0.5px; flex-wrap: wrap; }
+    .session-line .tag { margin-left: 0; }
+    .session-line a {
+      color: var(--accent); text-decoration: none;
+      border-bottom: 1px dashed rgba(255, 75, 31, 0.5);
+      overflow-wrap: anywhere;
+    }
+    .session-line a:hover { color: #ff7a3d; }
+    footer.foot a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
     .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; position: relative; }
     #sessionInfo { font-size: 0.75rem; letter-spacing: 1px; color: var(--muted); }
     /* Sign-in dropdown: overlays instead of pushing content, animates open */
@@ -369,6 +379,10 @@
           <span class="live"><i></i>LIVE</span>
         </div>
         <div class="sysline" style="margin-top:6px; opacity:0.7;"><span id="instanceInfo">One address, many projects</span></div>
+        <div class="sysline session-line" id="sessionLine" style="display:none;">
+          <span class="tag">PUBLIC</span>
+          <a id="sessionLink" href="#" target="_blank" rel="noopener">--</a>
+        </div>
       </div>
       <div class="controls">
         <span id="sessionInfo"></span>
@@ -782,17 +796,42 @@
     // Which manager instance is this? Matters when several run side by side.
     function renderInstance(data) {
       const el = document.getElementById('instanceInfo');
-      if (!el) return;
-      const name = data && data.instance;
-      if (!name || String(name).toLowerCase() === 'main') {
-        el.textContent = 'One address, many projects';
-        return;
+      if (el) {
+        const name = data && data.instance;
+        if (!name || String(name).toLowerCase() === 'main') {
+          el.textContent = 'One address, many projects';
+        } else {
+          const range = (data.appPorts || []).join('-');
+          el.textContent = 'Instance "' + name + '"' +
+            (data.port ? ' · port ' + data.port : '') +
+            (range ? ' · app ports ' + range : '') +
+            ' · own projects & link';
+        }
       }
-      const range = (data.appPorts || []).join('-');
-      el.textContent = 'Instance "' + name + '"' +
-        (data.port ? ' · port ' + data.port : '') +
-        (range ? ' · app ports ' + range : '') +
-        ' · own projects & link';
+      renderSession(data && data.sessionUrl);
+    }
+
+    // This session's public tunnel link, once one exists. Falls back to the
+    // address the browser is already on, so it is never blank or misleading.
+    function renderSession(url) {
+      const line = document.getElementById('sessionLine');
+      const link = document.getElementById('sessionLink');
+      const foot = document.getElementById('footAddr');
+      const href = url || location.origin;
+      if (line) line.style.display = '';
+      if (link) {
+        link.textContent = href;
+        link.href = href;
+        link.title = url ? 'Open this session on the public link' : 'No tunnel yet - showing this device';
+      }
+      if (foot) {
+        if (url) {
+          foot.innerHTML = 'PUBLIC LINK &mdash; <a href="' + esc(url) +
+            '" target="_blank" rel="noopener">' + esc(url) + '</a>';
+        } else {
+          foot.textContent = 'ONE LINK PER PROJECT (no tunnel yet)';
+        }
+      }
     }
 
     function renderProjects(projects) {
