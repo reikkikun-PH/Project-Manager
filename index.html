@@ -57,15 +57,15 @@
     }
     .brand h1 {
       font-family: var(--dot); font-weight: 400;
-      font-size: clamp(1.9rem, 5vw, 2.9rem);
-      letter-spacing: 6px; line-height: 1;
+      font-size: clamp(1.8rem, 4.6vw, 2.6rem);
+      letter-spacing: 3px; line-height: 1.05;
       color: #f5efe2;
       text-shadow: 0 0 18px rgba(255, 120, 60, 0.25);
     }
     .brand h1 span { color: var(--accent); }
     .sysline {
       display: flex; align-items: center; gap: 8px;
-      margin-top: 10px; font-size: 0.82rem; font-weight: 500; letter-spacing: 1.5px;
+      margin-top: 8px; font-size: 0.8rem; font-weight: 500; letter-spacing: 0.4px;
       color: #faf6ec;
       text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
     }
@@ -78,9 +78,9 @@
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     .live {
       display: inline-flex; align-items: center; gap: 6px;
-      font-size: 0.68rem; letter-spacing: 2px; color: var(--accent);
+      font-size: 0.66rem; letter-spacing: 1.2px; color: var(--accent);
       border: 1px solid rgba(255, 75, 31, 0.45); border-radius: 20px;
-      padding: 4px 10px; margin-left: 8px; background: var(--accent-soft);
+      padding: 3px 9px; margin-left: 8px; background: var(--accent-soft);
     }
     .live i {
       width: 7px; height: 7px; border-radius: 50%;
@@ -197,13 +197,13 @@
     .status.err { color: var(--red); }
 
     /* ---------- project grid ---------- */
-    .count { color: rgba(250, 246, 236, 0.92); font-size: 0.78rem; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+    .count { color: rgba(250, 246, 236, 0.92); font-size: 0.78rem; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
     .proj {
       background: linear-gradient(180deg, #1c1f26, #14161b);
       border: 1px solid var(--line);
-      border-radius: var(--radius); padding: 18px;
-      display: flex; flex-direction: column; gap: 10px; min-width: 0;
+      border-radius: var(--radius); padding: 16px;
+      display: flex; flex-direction: column; gap: 8px; min-width: 0;
       box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
       transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
       position: relative; overflow: hidden;
@@ -214,36 +214,48 @@
       opacity: 0.7;
     }
     .proj:hover { transform: translateY(-3px); border-color: rgba(255, 75, 31, 0.5); box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 75, 31, 0.12); }
-    .proj-head { display: flex; align-items: center; gap: 10px; }
-    .pnum { font-family: var(--dot); font-size: 0.85rem; color: var(--muted); letter-spacing: 1px; }
-    .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .proj-head { display: flex; align-items: center; gap: 8px; }
+    .pnum { font-family: var(--dot); font-size: 0.8rem; color: #8b8377; letter-spacing: 0.5px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
     .dot.online { background: var(--green); box-shadow: 0 0 12px var(--green); }
     .dot.running { background: var(--green); box-shadow: 0 0 12px var(--green); }
     .dot.starting { background: var(--amber); box-shadow: 0 0 12px var(--amber); animation: blink 1.2s infinite; }
     .dot.warn { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
     .dot.offline, .dot.missing { background: var(--red); box-shadow: 0 0 10px rgba(255, 90, 90, 0.8); }
     .proj-name {
-      font-family: var(--dot); font-size: 1.05rem; letter-spacing: 2px;
+      font-family: var(--dot); font-size: 1.02rem; letter-spacing: 1px;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f5efe2;
+      min-width: 0;
     }
+    /* Status as a quiet pill beside the name instead of its own line */
+    .pill {
+      font-size: 0.64rem; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 20px; flex-shrink: 0;
+      background: #0e1013; border: 1px solid #3a4049; color: #bdb3a1;
+    }
+    .pill.online, .pill.running { color: var(--green); border-color: rgba(53, 208, 127, 0.45); }
+    .pill.starting { color: var(--amber); border-color: rgba(232, 161, 61, 0.45); }
+    .pill.offline, .pill.missing { color: var(--red); border-color: rgba(255, 90, 90, 0.45); }
+    .pill.warn { color: var(--amber); border-color: rgba(232, 161, 61, 0.45); }
     .tag {
-      font-size: 0.66rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
-      padding: 4px 10px; border-radius: 20px;
-      background: #0e1013; color: #d8cdb8;
-      border: 1px solid #3a4049; margin-left: auto; flex-shrink: 0;
+      font-size: 0.64rem; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+      padding: 3px 9px; border-radius: 20px;
+      background: #0e1013; color: #cfc5b1;
+      border: 1px solid #3a4049; flex-shrink: 0;
     }
     .tag.lock { color: var(--accent); border-color: rgba(255, 75, 31, 0.5); }
-    .dots {
-      height: 8px; opacity: 0.8;
-      background: radial-gradient(circle, rgba(242, 237, 228, 0.4) 1.2px, transparent 1.8px) 0 0 / 10px 8px repeat-x;
+    /* Muted path line (full URL lives in the Open button's tooltip) */
+    .proj-path { font-size: 0.68rem; color: #8b8377; letter-spacing: 0.3px; overflow-wrap: anywhere; }
+    .proj-note { font-size: 0.72rem; line-height: 1.55; color: #b7ab93; overflow-wrap: anywhere; }
+    .proj-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
+    .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; letter-spacing: 0.6px; text-decoration: none; text-align: center; }
+    /* Open is the one action that matters - make it obvious */
+    .proj-actions .btn-open {
+      background: rgba(255, 75, 31, 0.12); border-color: rgba(255, 75, 31, 0.5);
+      color: #ffb59b; font-weight: 600;
     }
-    .proj-target { font-size: 0.76rem; letter-spacing: 0.5px; color: #b7ab93; overflow-wrap: anywhere; line-height: 1.6; }
-    .proj-state { font-size: 0.72rem; font-weight: 500; letter-spacing: 2.5px; text-transform: uppercase; color: rgba(250, 246, 236, 0.85); }
-    .proj-state b { color: var(--accent); font-weight: 600; }
-    .proj-url { font-size: 0.72rem; color: var(--accent); overflow-wrap: anywhere; }
-    .proj-actions { display: flex; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
-    .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; text-decoration: none; text-align: center; }
-    .empty { color: var(--muted); text-align: center; padding: 28px; grid-column: 1 / -1; font-size: 0.8rem; letter-spacing: 2px; }
+    .proj-actions .btn-open:hover { background: rgba(255, 75, 31, 0.2); border-color: var(--accent); }
+    .empty { color: var(--muted); text-align: center; padding: 28px; grid-column: 1 / -1; font-size: 0.8rem; letter-spacing: 1px; line-height: 1.7; }
     .empty .btn { margin-top: 12px; }
     /* ---------- accounts list (admin only) ---------- */
     .acct-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px dashed var(--line); flex-wrap: wrap; }
@@ -281,13 +293,13 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ---------- system monitor ---------- */
-    .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-    .sys-box { background: #0e1013; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
-    .sys-label { font-size: 0.66rem; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
-    .sys-val { font-family: var(--dot); font-size: 1.7rem; letter-spacing: 2px; color: #f5efe2; margin: 6px 0 8px; }
-    .sys-val small { font-size: 0.8rem; color: var(--muted); letter-spacing: 1px; }
+    .sys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .sys-box { background: #0e1013; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+    .sys-label { font-size: 0.64rem; letter-spacing: 1.2px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+    .sys-val { font-family: var(--dot); font-size: 1.45rem; letter-spacing: 1px; color: #f5efe2; margin: 4px 0 7px; }
+    .sys-val small { font-size: 0.74rem; color: var(--muted); letter-spacing: 0.5px; }
     .sys-val .accent { color: var(--accent); }
-    .sys-sub { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.5px; margin-top: 8px; }
+    .sys-sub { font-size: 0.7rem; color: var(--muted); letter-spacing: 0.2px; margin-top: 6px; line-height: 1.5; }
     .bar { height: 10px; background: #05070a; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .bar i { display: block; height: 100%; width: 0; border-radius: 6px;
       background: linear-gradient(90deg, #e23c10, #ff7a3d);
@@ -295,15 +307,20 @@
     .gpu-row { padding: 10px 0; border-top: 1px dashed var(--line); }
     .gpu-row:first-child { border-top: none; }
     .gpu-name { font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text); overflow-wrap: anywhere; }
-    /* ---------- per-project resource usage ---------- */
+    /* ---------- per-project resource usage ----------
+       One compact line on the card; everything else lives in the
+       hover/focus tooltip so the grid stays readable. */
     .usage {
-      font-size: 0.68rem; letter-spacing: 0.4px; color: #a9a08d;
-      line-height: 1.75; overflow-wrap: anywhere;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+      font-size: 0.68rem; letter-spacing: 0.2px; color: #9c9384;
+      cursor: help;
     }
-    .usage b { color: var(--accent); font-weight: 600; }
-    .usage .sep { opacity: 0.4; padding: 0 5px; }
+    .usage i { font-style: normal; opacity: 0.55; padding-right: 4px; }
+    .usage b { color: #cfc5b1; font-weight: 600; }
+    .usage .u-cpu b { color: var(--accent); }
+    .usage .u-idle { color: #7d7568; }
     .usage-bar {
-      display: inline-block; width: 52px; height: 5px; border-radius: 3px;
+      display: inline-block; width: 34px; height: 4px; border-radius: 2px;
       background: #05070a; border: 1px solid var(--line); vertical-align: 1px;
       margin-right: 5px; overflow: hidden;
     }
@@ -312,8 +329,8 @@
       background: linear-gradient(90deg, #e23c10, #ff7a3d);
     }
     footer.foot {
-      margin-top: 26px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
-      font-size: 0.72rem; font-weight: 500; letter-spacing: 3px; color: rgba(250, 246, 236, 0.8); text-transform: uppercase;
+      margin-top: 22px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+      font-size: 0.7rem; font-weight: 500; letter-spacing: 1.2px; color: rgba(250, 246, 236, 0.75);
       text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
     }
     footer.foot .accent { color: var(--accent); }
@@ -365,7 +382,7 @@
       .proj-actions { display: grid; grid-template-columns: 1fr 1fr; }
       .proj-actions .btn { flex: none; padding: 12px 8px; font-size: 0.74rem; }
       .proj-actions .btn:only-child { grid-column: 1 / -1; }
-      .proj-url { word-break: break-all; }
+      .proj-path { word-break: break-all; }
       .sys-grid { grid-template-columns: minmax(0, 1fr); }
       .sys-val { font-size: 1.5rem; }
       footer.foot { font-size: 0.64rem; letter-spacing: 2px; }
@@ -879,9 +896,7 @@
       }
     }
 
-    // Per-project resource usage line (owner/admin only - the API withholds
-    // it from everyone else). RAM bar is scaled against a 1 GB reference so
-    // big projects visibly stand out without needing a tooltip.
+    // Formatting helpers shared by the usage line and the HW totals.
     function fmtBytes(mb) {
       if (mb == null) return '--';
       if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
@@ -893,41 +908,53 @@
       return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
 
+    // One compact usage line per card; the full breakdown (files, dirs, largest
+    // files, logs, pid, port, uptime) goes into the tooltip so a grid of
+    // projects stays scannable instead of shouting numbers.
     function usageLine(p) {
       const u = p.usage || {};
       const d = u.disk || {};
-      const proc = u.proc || null;
-      const bits = [];
-      if (proc && proc.pid) {
-        const cpu = proc.cpu == null ? null : proc.cpu;
+      const pr = u.proc || null;
+      const tip = [];
+      const show = [];
+
+      if (pr && pr.pid) {
+        const cpu = pr.cpu;
         const bar = cpu == null ? '' :
-          '<span class="usage-bar"><i style="width:' + Math.min(100, cpu / 8).toFixed(1) + '%"></i></span>';
-        bits.push('CPU ' + (cpu == null ? 'measuring' : '<b>' + cpu.toFixed(1) + '%</b>'));
-        if (cpu != null) bits[0] = bar + bits[0];
-        if (proc.rssMb != null) bits.push('RAM <b>' + fmtBytes(proc.rssMb) + '</b>');
-        if (proc.upSec != null) bits.push('up ' + fmtUptime(proc.upSec));
-        if (p.port) bits.push('port ' + esc(String(p.port)));
+          '<span class="usage-bar"><i style="width:' +
+          Math.min(100, cpu / 25).toFixed(1) + '%"></i></span>';
+        show.push('<span class="u-cpu">' + bar +
+          (cpu == null ? '<span class="u-idle">CPU&hellip;</span>'
+            : '<i>CPU</i><b>' + cpu.toFixed(1) + '%</b>') + '</span>');
+        tip.push('CPU ' + (cpu == null ? 'measuring' : cpu.toFixed(1) + '%'));
+        if (pr.rssMb != null) {
+          show.push('<span><i>RAM</i><b>' + fmtBytes(pr.rssMb) + '</b></span>');
+          tip.push('RAM ' + fmtBytes(pr.rssMb));
+        }
+        if (pr.upSec != null) tip.push('up ' + fmtUptime(pr.upSec));
+        tip.push('pid ' + pr.pid);
+        if (p.port) tip.push('port ' + p.port);
       } else if (p.status === 'stopped') {
-        bits.push('not running');
+        show.push('<span class="u-idle">not running</span>');
       }
+
       if (d.files != null) {
-        bits.push('disk <b>' + fmtBytes((d.bytes || 0) / 1048576) + '</b>');
-        bits.push(fmtCount(d.files) + ' files');
-        if (d.dirs) bits.push(fmtCount(d.dirs) + ' dirs');
-        if (d.truncated) bits.push('partial');
+        show.push('<span><i>disk</i><b>' +
+          fmtBytes((d.bytes || 0) / 1048576) + '</b></span>');
+        tip.push(d.files + ' files in ' + (d.dirs || 0) +
+          ((d.dirs || 0) === 1 ? ' folder' : ' folders'));
+        if (d.truncated) tip.push('scan was cut short (very large folder)');
+        (d.largest || []).forEach(f => tip.push('largest: ' + f.name +
+          ' (' + fmtBytes(f.mb) + ')'));
       }
-      if (u.logsMb) {
-        const logBits = Object.keys(u.logsMb).map(k =>
-          k.replace('runner-', '') + ' ' + fmtBytes(u.logsMb[k]));
-        if (logBits.length) bits.push('logs ' + logBits.join(' + '));
-      }
-      if (!bits.length) return '';
-      let out = '<div class="usage">' + bits.join('<span class="sep">&middot;</span>') + '</div>';
-      if (d.largest && d.largest.length) {
-        const names = d.largest.map(f => esc(f.name) + ' (' + fmtBytes(f.mb) + ')');
-        out += '<div class="usage">largest: ' + names.join(', ') + '</div>';
-      }
-      return out;
+      const logs = u.logsMb || {};
+      Object.keys(logs).forEach(k => {
+        tip.push('log ' + k.replace('runner-', '') + ': ' + fmtBytes(logs[k]));
+      });
+
+      if (!show.length) return '';
+      return '<div class="usage" title="' + esc(tip.join('\n')) + '">' +
+        show.join('') + '</div>';
     }
 
     function renderProjects(projects) {
@@ -1006,14 +1033,14 @@
         let lockRow = '';
         if (admin) {
           if (pending) {
-            extra += '<div class="proj-target">Uploaded by ' + esc(p.owner || 'unknown')
+            extra += '<div class="proj-note">Uploaded by ' + esc(p.owner || 'unknown')
               + ' — approve to make it live, or reject to remove it.</div>';
             lockRow = '<div class="proj-actions">'
               + '<button type="button" class="btn btn-primary" data-act="approve">Approve</button>'
               + '<button type="button" class="btn btn-danger" data-act="reject">Reject</button>'
               + '</div>';
           } else if (frozen) {
-            extra += '<div class="proj-target">Locked'
+            extra += '<div class="proj-note">Locked'
               + (p.authUser ? ' by ' + esc(p.authUser) : '')
               + ' &middot; unlock to make changes</div>';
             lockRow = '<div class="proj-actions"><button type="button" class="btn" data-act="unlock">Unlock</button></div>';
@@ -1021,37 +1048,44 @@
             lockRow = '<div class="proj-actions"><button type="button" class="btn" data-act="protect">Lock</button></div>';
           }
         } else if (pending && mine) {
-          extra += '<div class="proj-target">Waiting for admin approval — it goes live once approved.</div>';
+          extra += '<div class="proj-note">Waiting for admin approval — it goes live once approved.</div>';
         } else if (isSignedIn() && !admin && !mine) {
-          extra += '<div class="proj-target">View only — run, settings and files stay private to the uploader.</div>';
+          extra += '<div class="proj-note">View only — run, settings and files stay private to the uploader.</div>';
         }
         if (p.type === 'managed' && p.note) {
-          extra += '<div class="proj-target">' + esc(p.note) + '</div>';
+          extra += '<div class="proj-note">' + esc(p.note) + '</div>';
         }
         if (state === 'noindex') {
-          extra += '<div class="proj-target">Folder has no index.html — add one to show the site.</div>';
+          extra += '<div class="proj-note">Folder has no index.html — add one to show the site.</div>';
         } else if (state === 'missing') {
-          extra += '<div class="proj-target">Folder not found on the server — re-upload the zip.</div>';
+          extra += '<div class="proj-note">Folder not found on the server — re-upload the zip.</div>';
         }
         if ((admin || mine) && p.usage) {
           extra += usageLine(p);
         }
+        // Header: number, dot, name, then tags pushed to the right.
+        // Status lives in a pill next to the name (no separate STATUS line).
         card.innerHTML =
           '<div class="proj-head">' +
             '<span class="pnum">' + num + '</span>' +
             '<span class="dot ' + dotClass + '" title="' + esc(stateLabel) + '"></span>' +
             '<span class="proj-name">' + esc(p.name) + '</span>' +
-            '<span class="tag">' + esc(typeLabel) + '</span>' +
-            (p.locked ? '<span class="tag lock">Locked</span>' : '') +
-            (pending ? '<span class="tag pending">Awaiting approval</span>' : '') +
-            (admin && p.owner ? '<span class="tag">' + esc(p.owner) + '</span>' : '') +
+            '<span class="pill ' + dotClass + '">' + esc(stateLabel) + '</span>' +
+            '<span style="margin-left:auto; display:flex; gap:5px;">' +
+              '<span class="tag">' + esc(typeLabel) + '</span>' +
+              (p.locked ? '<span class="tag lock">Locked</span>' : '') +
+              (pending ? '<span class="tag pending">Pending</span>' : '') +
+              (admin && p.owner ? '<span class="tag">' + esc(p.owner) + '</span>' : '') +
+            '</span>' +
           '</div>' +
-          '<div class="dots"></div>' +
-          '<div class="proj-state">STATUS <b>' + esc(stateLabel) + '</b></div>' +
+          '<div class="proj-path" title="' + esc(location.origin + p.url) + '">' +
+            esc(p.url) +
+          '</div>' +
           extra +
-          '<div class="proj-url">' + esc(location.origin + p.url) + '</div>' +
           '<div class="proj-actions">' +
-            (pending ? '' : '<a class="btn" href="' + esc(p.url) + '" target="_blank" rel="noopener">Open</a>') +
+            (pending ? '' : '<a class="btn btn-open" href="' + esc(p.url) +
+              '" target="_blank" rel="noopener" title="' +
+              esc(location.origin + p.url) + '">Open</a>') +
             mid +
             ((admin || mine) && !frozen ? '<button type="button" class="btn btn-danger">Remove</button>' : '') +
           '</div>' +
