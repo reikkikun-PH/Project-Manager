@@ -34,7 +34,41 @@ link (`https://xxxx.trycloudflare.com`) and a link per project. Ctrl+C stops bot
 The dashboard is at `http://localhost:8000` — sign in with **`admin` / `admin123`**
 unless you set your own in `credentials.json`.
 
-### The session link
+### Per-project resource usage
+
+Every project card shows its own resource line for the **uploader and admins** (it
+carries the same private-data rules as the configuration — other users and visitors
+see nothing):
+
+| Shown | Meaning |
+|---|---|
+| `CPU ▓▓░░ 3.1%` | That project's process CPU since the previous poll |
+| `RAM 41.6 MB` | Working set of its process |
+| `up 12m` | How long it has been running |
+| `port 8100` | The port it was given |
+| `disk 40.84 MB` | Size of its project folder |
+| `files 38 · dirs 3` | What is inside that folder |
+| `largest: …onnx (36.9 MB)` | Its three biggest files |
+| `logs out 1.2 MB` | Runner log sizes, handy when something is looping |
+
+The HOST box in the hardware panel totals it up: apps running, RAM and CPU summed
+across all of them, and total project disk + file count.
+
+How it is measured, and why it stays cheap:
+
+- **CPU%** is a delta between two samples of the process CPU counter
+  (`GetProcessTimes` on Windows, `/proc/<pid>/stat` on Linux/Termux), so the first
+  poll shows "measuring" rather than a wrong number.
+- **RAM** is the working set (`GetProcessMemoryInfo` / `/proc/<pid>/statm`).
+- **Disk** walks the project folder, but stops after 4 seconds or 40 000 files and
+  caches the result for 20 seconds — a folder full of model weights can't stall a
+  dashboard refresh, and the card shows `partial` when the walk was cut short.
+- Everything is best-effort and wrapped so it can never break the dashboard; a field
+  that cannot be read is simply omitted.
+
+On the current machine that reads roughly: VerifID ~41 MB RAM for a 40.8 MB folder
+(dominated by a 36.9 MB face-recognition model), the three static sites under 0.15 MB
+each, and the whole board ~41 MB RAM + ~41 MB disk.
 
 As soon as the tunnel is up, the dashboard shows the **current public link** — in the
 header (`PUBLIC https://xxxx.trycloudflare.com`) and in the footer, both clickable —
@@ -182,6 +216,7 @@ return 404 until approved.
 | **Open** the project at `/p/<id>/` | yes | yes | yes | yes |
 | Name, type, live status | yes | yes | yes | yes |
 | Folder path, run command, port | **yes** | **yes** | no | no |
+| CPU / RAM / disk / PID of the project | **yes** | **yes** | no | no |
 | Run / Stop / Runner / Remove / Lock | **yes** | **yes** | no | no |
 | Runner errors, lock owner | yes | yes | no | no |
 
