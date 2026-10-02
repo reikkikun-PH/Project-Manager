@@ -76,11 +76,27 @@ What gets emailed:
 | Trigger | Email |
 |---|---|
 | Signup asking for the **admin** role | username, and where to approve it |
+| A **user** account signup | username, and a note that it's active immediately |
 | A **user's** project upload (waiting for approval) | project name, id, type, owner |
-| A **user** signup | *nothing* — it activates instantly |
 | An **admin** upload | *nothing* — it goes live immediately |
 
+Verify it end to end from the dashboard: sign in as admin → **ACCOUNTS** →
+**Send test e-mail**. Every attempt (sent or failed) is also appended to
+`notify.log`, so you can check delivery history without a console:
+
+```sh
+cat notify.log          # or: type notify.log   on Windows
+```
+
 Notes:
+
+- If a test e-mail arrives but an approval one doesn't, the difference is *which*
+  trigger fired: admin uploads send nothing because they need no approval.
+- **Check spam/quarantine too.** Mail from the shared `onboarding@resend.dev`
+  domain is very likely to be filtered by Gmail. Verifying your own domain in
+  Resend and using it as `from` is the reliable fix.
+- A successful send means Resend accepted the message, not that Gmail delivered
+  it. The Resend dashboard (Emails → Logs) shows per-message delivery status.
 
 - Sending happens in a background thread with a 12s timeout, so a slow or broken mail
   API never delays an upload; failures are only written to the server log
@@ -182,6 +198,7 @@ Created at runtime, **never in git**:
 | `credentials.json` | Accounts and roles |
 | `project_auth.json` | Per-project lock passwords |
 | `notify.json` | Approval e-mail settings (holds the Resend API key) |
+| `notify.log` | Every notification attempt (`SENT` / `FAILED` / `SKIPPED`) |
 | `Project List/` | All hosted projects, their logs and databases |
 | `instances/<name>/` | Everything above, for each extra instance |
 | `cloudflared` / `.exe` | Tunnel binary (~90MB) |

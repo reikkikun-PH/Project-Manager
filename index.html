@@ -453,6 +453,9 @@
       <h2><span class="num">ID</span>ACCOUNTS <span class="live" style="margin-left:10px;" id="pendingBadge" hidden><i></i><span id="pendingCount">0</span>&nbsp;PENDING</span></h2>
       <div id="acctList"><div class="sys-sub">Loading&hellip;</div></div>
       <p class="hint">User signups start instantly. Admin signups stay pending until you approve them here.</p>
+      <div class="proj-actions">
+        <button type="button" class="btn" id="notifyTestBtn">Send test e-mail</button>
+      </div>
       <p class="status" id="acctStatus"></p>
     </section>
 
@@ -1475,6 +1478,34 @@
         if (btn) { btn.disabled = false; }
       }
     }
+
+    // Admin: confirm the approval inbox actually works (notify.json).
+    const notifyTestBtn = document.getElementById('notifyTestBtn');
+    async function sendNotifyTest() {
+      if (!notifyTestBtn) return;
+      notifyTestBtn.disabled = true;
+      notifyTestBtn.textContent = 'Sending...';
+      notifyTestBtn.classList.add('busy');
+      try {
+        const res = await fetch('/api/notify-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requester: session.username })
+        });
+        const data = await res.json();
+        setAcctStatus(data.message || (data.error || 'Failed.'), !!data.ok);
+        if (!data.ok && data.detail) {
+          setAcctStatus((data.error || 'Failed.') + ' (' + data.detail + ')', false);
+        }
+      } catch (e) {
+        setAcctStatus('Error connecting to server.', false);
+      } finally {
+        notifyTestBtn.disabled = false;
+        notifyTestBtn.textContent = 'Send test e-mail';
+        notifyTestBtn.classList.remove('busy');
+      }
+    }
+    if (notifyTestBtn) notifyTestBtn.addEventListener('click', sendNotifyTest);
 
     async function reviewAccount(username, op, btn) {
       if (btn) { btn.disabled = true; }

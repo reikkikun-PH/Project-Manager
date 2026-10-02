@@ -187,6 +187,28 @@ def _send_resend(cfg, subject, body):
         return False, str(e)
 
 
+NOTIFY_LOG = os.path.join(DATA_DIR, "notify.log")
+
+
+def _notify_log(line):
+    """Append to notify.log so results are visible even when the server runs
+    in a hidden window (no console to read). Never raises."""
+    try:
+        with open(NOTIFY_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+    # Keep the file from growing forever across a long-running instance.
+    try:
+        if os.path.getsize(NOTIFY_LOG) > 512 * 1024:
+            with open(NOTIFY_LOG, "r", encoding="utf-8", errors="replace") as f:
+                tail = f.readlines()[-400:]
+            with open(NOTIFY_LOG, "w", encoding="utf-8") as f:
+                f.writelines(tail)
+    except OSError:
+        pass
+
+
 def notify(subject, body):
     """Email the approver in the background. Fire-and-forget by design.
 
@@ -195,8 +217,13 @@ def notify(subject, body):
     """
     cfg = notify_config()
     if cfg.get("enabled") is False:
+        _notify_log(f"{time.strftime('%H:%M:%S')} SKIPPED (disabled): {subject}")
         return
-    if not str(cfg.get("resendApiKey") or "").strip():
+    key = str(cfg.get("resendApiKey") or "").strip()
+    to = str(cfg.get("to") or "").strip()
+    if not key or not to:
+        _notify_log(f"{time.strftime('%H:%M:%S')} SKIPPED "
+                    f"(no api key / recipient): {subject}")
         return
     stamp = time.strftime("%Y-%m-%d %H:%M")
     full = (f"{body}\n\nDashboard: http://127.0.0.1:{PORT}/\n"
@@ -205,19 +232,29 @@ def notify(subject, body):
     def worker():
         ok, detail = _send_resend(cfg, subject, full)
         if ok:
-            log_line("Notify", f"sent: {subject}")
+            log_line("Notify", f"sent to {to}: {subject}")
+            _notify_log(f"{time.strftime('%H:%M:%S')} SENT to {to}: {subject}")
         else:
             log_line("Notify", f"FAILED: {subject} - {detail}")
+            _notify_log(f"{time.strftime('%H:%M:%S')} FAILED: {subject} - {detail}")
 
     threading.Thread(target=worker, daemon=True).start()
 
 
-def notify_admin_request(username):
-    """A user asked for the admin role."""
-    notify(f"[{INSTANCE}] Approval needed: admin account '{username}'",
-           f"A signup requested ADMIN access.\n\n"
-           f"Username: {username}\n\n"
-           f"Approve or reject it in the ACCOUNTS card of the dashboard.")
+def notify_account_created(username, role, pending_admin):
+    """A signup happened. Admin ones also need approval, so say which."""
+    if pending_admin:
+        notify(f"[{INSTANCE}] Approval needed: admin account '{username}'",
+               f"A signup requested ADMIN access.\n\n"
+               f"Username: {username}\n\n"
+               f"Approve or reject it in the ACCOUNTS card of the dashboard.")
+    else:
+        notify(f"[{INSTANCE}] New account created: '{username}'",
+               f"A new USER account signed up and is active immediately.\n\n"
+               f"Username: {username}\n"
+               f"Role:     user (no approval needed)\n\n"
+               f"Review it in the ACCOUNTS card of the dashboard and remove it "
+               f"if you don't recognise the name.")
 
 
 def notify_project_request(name, pid, owner, ptype):
@@ -2883,13 +2920,46 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             log_line("Auth", f"Registered {username} ({want_role}, "
                      f"{'pending' if pending_admin else 'active'})")
+            # Notify on EVERY signup, not just admin ones: you asked to be told
+            # when an account is created, and a plain User account still
+            # appearing is news (it may be someone you don't recognise).
+            notify_account_created(username, want_role, pending_admin)
             if pending_admin:
-                notify_admin_request(username)
                 self._send_json({"ok": True, "status": STATUS_PENDING,
                                  "message": "Admin request sent - wait for approval, then sign in."})
             else:
                 self._send_json({"ok": True, "status": STATUS_ACTIVE,
                                  "message": "Account created - sign in."})
+            return
+
+        if path == "/api/notify-test":
+            # Admin-only: send a test e-mail so the approver can confirm their
+            # inbox works without waiting for a real request.
+            body = self._read_body()
+            _admin, _err = requester_is_admin(body)
+            if _err:
+                self._send_json({"ok": False, "error": _err}, 403)
+                return
+            cfg = notify_config()
+            key = str(cfg.get("resendApiKey") or "").strip()
+            to = str(cfg.get("to") or "").strip()
+            if cfg.get("enabled") is False:
+                self._send_json({"ok": False, "error": "Notifications are disabled in notify.json."}, 400)
+                return
+            if not key or not to:
+                self._send_json({"ok": False,
+                                 "error": "No api key or recipient - check notify.json."}, 400)
+                return
+            ok, detail = _send_resend(
+                cfg, f"[{INSTANCE}] Test e-mail",
+                "This is a test from your Project Manager.\n\n"
+                "If you can read this, approval requests will reach you too.")
+            _notify_log(f"{time.strftime('%H:%M:%S')} "
+                        f"{'SENT (test)' if ok else 'FAILED (test)'}: {detail[:120]}")
+            self._send_json({"ok": ok, "error": None if ok else detail,
+                             "message": (f"Test e-mail sent to {to}."
+                                         if ok else "Send failed."),
+                             "detail": detail}, 200 if ok else 502)
             return
 
         if path == "/api/accounts":
