@@ -135,19 +135,21 @@ do_setup() {
     warn "No cloudflared for arch '$ARCH' - install it with:  pkg install cloudflared"
   fi
 
-  # Admin login. Without credentials.json the server uses admin/admin123,
-  # so we only write a file when a password was requested.
+  # Admin login. Without credentials.json the server falls back to
+  # superadmin/admin123, so we only write a file when a password was
+  # requested. The account written here is the super admin: the one account
+  # that can never be removed from the accounts list.
   if [ -f "./credentials.json" ]; then
     say "credentials.json already exists - kept as-is."
   elif [ -n "${ADMIN_PASS:-}" ]; then
     PYJ="$(pick_python)"
     [ -n "$PYJ" ] || die "No python to write credentials.json safely."
-    printf '[\n  {\n    "username": "admin",\n    "password": %s,\n    "role": "admin",\n    "status": "active"\n  }\n]\n' \
+    printf '[\n  {\n    "username": "superadmin",\n    "password": %s,\n    "role": "admin",\n    "status": "active",\n    "super": true\n  }\n]\n' \
       "$(printf '%s' "$ADMIN_PASS" | "$PYJ" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
       > ./credentials.json
-    say "Admin login created from ADMIN_PASS."
+    say "Super admin login created from ADMIN_PASS."
   else
-    say "No credentials.json - the default login is admin / admin123."
+    say "No credentials.json - the default login is superadmin / admin123."
   fi
 
   chmod +x ./termux.sh 2>/dev/null || true
@@ -302,7 +304,7 @@ do_update() {
 
   [ -f index.html ] || warn "index.html is missing - the dashboard may not load."
   if [ ! -f credentials.json ]; then
-    say "No credentials.json yet - sign in with admin / admin123."
+    say "No credentials.json yet - sign in with superadmin / admin123."
   fi
   if ! command -v cloudflared >/dev/null 2>&1 && [ ! -x ./cloudflared ]; then
     warn "No cloudflared found - the public link will not start."

@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Running it — Server Project Manager, how it works</title>
+<meta name="description" content="The outside services the app uses, what to copy for a complete backup, and the behaviours that surprise people.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Runs before first paint: marks that scripting is available and applies the
+   remembered theme, so a dark-theme reader never sees a white flash on the
+   way between pages. */
+(function () {
+  var r = document.documentElement;
+  r.classList.add("js");
+  try {
+    var t = localStorage.getItem("arch-theme");
+    if (t === "light" || t === "dark") r.setAttribute("data-theme", t);
+  } catch (e) { /* private mode: fall back to the system preference */ }
+})();
+</script>
+</head>
+<body data-hint="None of the three outside services is required. Without them the app still runs.">
+<div class="wrap">
+
+<header class="top">
+  <div class="bar-progress" aria-hidden="true"><i id="readbar"></i></div>
+  <a class="brand" href="index.html">
+    <span class="brand-mark">SPM</span>
+    <span class="brand-name">Server Project Manager</span>
+  </a>
+  <nav class="nav" aria-label="Sections of this guide">
+    <a href="index.html">Overview</a>
+    <a href="upload.html">Walkthrough</a>
+    <a href="roles.html">Roles</a>
+    <a href="operations.html" aria-current="page">Running it</a>
+  </nav>
+  <div class="bar-actions">
+    <button type="button" class="btn" id="tourBtn">Take the tour</button>
+    <span class="prog" id="prog" hidden></span>
+    <button type="button" class="btn" id="prevBtn" hidden>Back</button>
+    <button type="button" class="btn" id="nextBtn" hidden>Next</button>
+    <button type="button" class="btn" id="tourStop" hidden>Stop</button>
+    <button type="button" class="btn" id="themeBtn" title="Switch between automatic, light and dark">Theme: auto</button>
+  </div>
+</header>
+
+<div class="phead">
+  <p class="eyebrow">04 — Running it</p>
+  <h1>What it needs, what to keep, <em>what to watch</em></h1>
+  <p class="tagline">
+    The three things this computer cannot do alone, what a complete backup
+    actually is, and the handful of behaviours that are deliberate but not
+    obvious from the interface.
+  </p>
+</div>
+
+<div class="subbar">
+  <div class="toc" aria-label="On this page">
+    <a href="#outside" aria-current="true">Outside services</a>
+    <a href="#backup">What to back up</a>
+    <a href="#gotchas">Good to know</a>
+  </div>
+</div>
+<p class="hintline" id="hint" role="status" aria-live="polite">&nbsp;</p>
+
+<main>
+
+<section id="outside">
+  <h2>Outside services</h2>
+  <p class="lede">
+    Three things this computer cannot do by itself. Each is optional, and each
+    has a fallback that keeps the app usable without it.
+  </p>
+
+  <details style="--lc:var(--l4);--lcs:var(--l4-soft)" open>
+    <summary>The public web address <span class="tag">sharing</span></summary>
+    <div class="body">
+      <p>
+        Starting the manager also asks Cloudflare for a free address on the
+        internet that forwards back to your computer, and prints it so you can
+        share it. The connection goes <b>outward</b>, so nothing is opened on
+        your router and no port is exposed to the internet.
+      </p>
+      <p>
+        The address changes each time you start, so the app checks it really
+        works before putting it on a page or in an email — you never share a link
+        that has already died.
+      </p>
+      <p>
+        <b>Without it:</b> everything still works on this computer alone. You
+        just cannot share the link with anyone else.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l4);--lcs:var(--l4-soft)">
+    <summary>The email service <span class="tag">notifications</span></summary>
+    <div class="body">
+      <p>Five kinds of message go out:</p>
+      <p>
+        <b>1.</b> A six-digit sign-in code for a new user. &nbsp;<b>2.</b> A new
+        account signed up. &nbsp;<b>3.</b> A new project is waiting for approval.
+        &nbsp;<b>4.</b> An admin request was approved or declined — sent to the
+        applicant. &nbsp;<b>5.</b> A "we received your request" acknowledgement,
+        so someone who applies knows it arrived.
+      </p>
+      <p>
+        The free plan used here needs no domain of your own — you confirm a
+        sender address with a six-digit code and can then email anyone, 300 times
+        a day.
+      </p>
+      <p>
+        <b>Without it:</b> nothing breaks. You just check the dashboard yourself
+        instead of being told.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l4);--lcs:var(--l4-soft)">
+    <summary>Package downloads <span class="tag">first run only</span></summary>
+    <div class="body">
+      <p>
+        If a project needs extra libraries, they are installed the first time it
+        starts rather than at upload. That needs the internet and can take a few
+        minutes; after that it never repeats.
+      </p>
+    </div>
+  </details>
+</section>
+
+<section id="backup">
+  <h2>What to back up</h2>
+  <p class="lede">
+    All of it is plain files in one folder, readable in any text editor. Copying
+    that folder is a complete backup — there is nothing else to export and no
+    database to dump.
+  </p>
+  <div class="tbl-wrap">
+  <table class="tbl">
+    <caption class="sr-only">Files to include in a complete backup</caption>
+    <thead><tr><th scope="col">What</th><th scope="col">What it holds</th></tr></thead>
+    <tbody>
+      <tr><td>Accounts</td><td>Usernames, passwords, roles, and who has been approved.</td></tr>
+      <tr><td>Project list</td><td>Every project: name, kind, where its files are, who owns it, whether it is approved.</td></tr>
+      <tr><td>Project folders</td><td>The actual uploaded files, one folder per project.</td></tr>
+      <tr><td>Lock passwords</td><td>Usernames and passwords for any locked projects.</td></tr>
+      <tr><td>Email settings</td><td>Which service to use and the keys for it.</td></tr>
+      <tr><td>Logs</td><td>What happened, including whether each email went out.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note warn" style="margin-top:16px">
+    <p>
+      The accounts file contains <b>passwords in plain text</b>. Treat the whole
+      folder as private: do not put it in a shared drive, and do not commit it to
+      a code repository.
+    </p>
+  </div>
+</section>
+
+<section id="gotchas">
+  <h2>Good to know</h2>
+  <p class="lede">
+    The places where the app behaves in a way you might not expect. Each of these
+    is a deliberate decision, but none are obvious from the interface.
+  </p>
+
+  <div class="note bad">
+    <p>
+      <b>Passwords are stored as plain text.</b> Anyone who can read the accounts
+      file can sign in as anyone. Keep the folder private, and don't reuse a
+      password you use elsewhere.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <b>Sign-in codes are not stored anywhere.</b> A new user's six-digit code
+      is emailed to them and kept only in the running program's memory, as a
+      scrambled fingerprint rather than the digits themselves. Restarting the
+      manager forgets any outstanding code — harmless, because they only last ten
+      minutes and asking for another is one click. Copying the accounts folder
+      to another machine gets you the accounts, never a usable code.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <b>Signing in does not survive a refresh.</b> The session lives in the page,
+      not in a cookie, so reloading signs you out and every action is re-checked
+      from scratch. Two browser tabs are two separate sessions —
+      <a href="roles.html#whylens">more on that</a>.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <b>Locking a project hides buttons; it does not hide the site.</b> Anyone
+      who already has the address can still open the project. Lock stops the
+      dashboard's controls being used — it is not a way of keeping people off the
+      link.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <b>Approval emails are sent while you wait, and the app tells you the
+      truth.</b> If the mail service rejects a message, the dashboard turns
+      amber and gives the reason instead of reporting a success that did not
+      happen. The account is still approved — you just know the applicant was not
+      told, so you can tell them yourself.
+    </p>
+  </div>
+
+  <div class="note warn">
+    <p>
+      <b>Emails sent from a gmail.com address carry no digital signature</b>, so
+      some will be treated as suspicious and land in spam. Sending from an
+      address on a domain you own fixes it.
+    </p>
+  </div>
+
+  <div class="note">
+    <p>
+      <b>The last administrator cannot be removed</b>, and neither can the one
+      removing themselves. The guard is deliberate, so the dashboard cannot end up
+      with nobody able to administer it. The built-in <b>super admin</b> goes
+      further and cannot be removed by anyone at all — see
+      <a href="roles.html#whylens">roles and permissions</a>.
+    </p>
+  </div>
+
+  <div class="note">
+    <p>
+      <b>Deleting a project can delete its folder.</b> There is a checkbox for
+      it, and it starts unticked — unticked removes only the entry and leaves
+      the files on disk.
+    </p>
+  </div>
+
+  <div class="note">
+    <p>
+      <b>Running a second manager side by side is supported</b> but has to be told
+      which one it is, so the two never fight over the same ports or the same
+      projects.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <nav class="pager" aria-label="Next and previous page">
+    <a href="roles.html">
+      <span class="dir">Previous</span>
+      <span class="to">Roles — who can do what</span>
+    </a>
+    <a href="index.html">
+      <span class="dir">Back to</span>
+      <span class="to">Overview — the four layers</span>
+    </a>
+  </nav>
+  <p style="margin-top:26px">
+    This guide describes how the app behaves, not how it is written. It is
+    documentation only: it is never served by the app, and nothing in the app
+    reads it. If the app's behaviour changes, these pages need updating with it.
+  </p>
+</footer>
+
+</div>
+
+<button type="button" class="btn" id="topBtn" title="Back to top" aria-label="Back to top">&uarr;</button>
+
+<script src="app.js"></script>
+</body>
+</html>

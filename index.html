@@ -150,6 +150,10 @@
     select option { background: #14161a; }
     .hint { font-size: 0.78rem; letter-spacing: 0.4px; color: #b7ab93; margin-top: 10px; line-height: 1.6; }
     .hint code { color: var(--accent); }
+    /* The address is the one thing they may need to retype later, so it gets
+       emphasis and wraps instead of truncating on a narrow screen. */
+    .signup-ok-mail { font-size: 0.82rem; font-weight: 700; color: var(--accent); overflow-wrap: anywhere; }
+    .signup-ok-msg { margin: 0; font-size: 0.82rem; line-height: 1.65; color: #b7ab93; }
     .dropzone {
       position: relative; overflow: hidden;
       background: linear-gradient(180deg, #1c1f26, #14161b);
@@ -195,10 +199,12 @@
     .status { font-size: 0.8rem; margin-top: 10px; min-height: 20px; letter-spacing: 0.5px; }
     .status.ok { color: var(--green); }
     .status.err { color: var(--red); }
+    /* Action succeeded, side effect didn't - needs saying, not alarming */
+    .status.warn { color: var(--amber); }
 
     /* ---------- project grid ---------- */
     .count { color: rgba(250, 246, 236, 0.92); font-size: 0.78rem; font-weight: 600; letter-spacing: 1.4px; text-transform: uppercase; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
     .proj {
       background: linear-gradient(180deg, #1c1f26, #14161b);
       border: 1px solid var(--line);
@@ -214,7 +220,8 @@
       opacity: 0.7;
     }
     .proj:hover { transform: translateY(-3px); border-color: rgba(255, 75, 31, 0.5); box-shadow: 0 22px 48px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 75, 31, 0.12); }
-    .proj-head { display: flex; align-items: center; gap: 8px; }
+    /* Head row: number, dot, name, status pill. The name owns the free space. */
+    .proj-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .pnum { font-family: var(--dot); font-size: 0.8rem; color: #8b8377; letter-spacing: 0.5px; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
     .dot.online { background: var(--green); box-shadow: 0 0 12px var(--green); }
@@ -222,11 +229,17 @@
     .dot.starting { background: var(--amber); box-shadow: 0 0 12px var(--amber); animation: blink 1.2s infinite; }
     .dot.warn { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
     .dot.offline, .dot.missing { background: var(--red); box-shadow: 0 0 10px rgba(255, 90, 90, 0.8); }
+    /* Name gets its own row of the header and wraps to 2 lines instead of
+       being crushed to "U..." by the badge cluster. */
     .proj-name {
-      font-family: var(--dot); font-size: 1.02rem; letter-spacing: 1px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f5efe2;
-      min-width: 0;
+      font-family: var(--dot); font-size: 1.02rem; letter-spacing: 1px; line-height: 1.3;
+      color: #f5efe2; min-width: 0; flex: 1 1 auto;
+      overflow: hidden; overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
     }
+    /* Path on the left, badges on the right - separate row so neither clips */
+    .proj-meta { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }
+    .proj-tags { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-left: auto; }
     /* Status as a quiet pill beside the name instead of its own line */
     .pill {
       font-size: 0.64rem; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
@@ -244,8 +257,13 @@
       border: 1px solid #3a4049; flex-shrink: 0;
     }
     .tag.lock { color: var(--accent); border-color: rgba(255, 75, 31, 0.5); }
+    /* Long owner names shorten rather than push the card wider */
+    .tag.clip { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
     /* Muted path line (full URL lives in the Open button's tooltip) */
-    .proj-path { font-size: 0.68rem; color: #8b8377; letter-spacing: 0.3px; overflow-wrap: anywhere; }
+    .proj-path {
+      font-size: 0.68rem; color: #8b8377; letter-spacing: 0.3px;
+      min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .proj-note { font-size: 0.72rem; line-height: 1.55; color: #b7ab93; overflow-wrap: anywhere; }
     .proj-actions { display: flex; gap: 6px; margin-top: auto; padding-top: 4px; flex-wrap: wrap; }
     .proj-actions .btn { flex: 1; padding: 9px 8px; font-size: 0.7rem; letter-spacing: 0.6px; text-decoration: none; text-align: center; }
@@ -261,6 +279,15 @@
     .acct-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px dashed var(--line); flex-wrap: wrap; }
     .acct-row:first-child { border-top: none; }
     .acct-name { font-weight: 600; overflow-wrap: anywhere; }
+    /* Applicant's address - a mailto so an approver can reply in one click.
+       Truncates on narrow screens but keeps the full value in the tooltip. */
+    .acct-email {
+      font-size: 0.7rem; color: var(--muted); text-decoration: none;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 100%; min-width: 0;
+    }
+    .acct-email:hover { color: var(--text); text-decoration: underline; }
+    .acct-email.none { font-style: italic; opacity: 0.7; }
     .acct-row .btn { padding: 8px 12px; min-height: 40px; font-size: 0.72rem; }
     /* Tappable checkbox row (44px target) in the delete dialog */
     .check-row {
@@ -375,14 +402,13 @@
       .grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
       .proj { padding: 15px 14px; }
       .proj-head { flex-wrap: wrap; row-gap: 8px; }
-      .proj-name { flex: 1 1 100%; order: 3; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-      .tag { margin-left: 0; }
-      .tag:first-of-type { margin-left: auto; }
+      .proj-name { flex: 1 1 100%; order: 3; }
+      .proj-tags { margin-left: 0; }
+      .proj-path { white-space: normal; overflow-wrap: anywhere; }
       /* Big thumb-friendly 2-col action grid instead of 4 squeezed in a row */
       .proj-actions { display: grid; grid-template-columns: 1fr 1fr; }
       .proj-actions .btn { flex: none; padding: 12px 8px; font-size: 0.74rem; }
       .proj-actions .btn:only-child { grid-column: 1 / -1; }
-      .proj-path { word-break: break-all; }
       .sys-grid { grid-template-columns: minmax(0, 1fr); }
       .sys-val { font-size: 1.5rem; }
       footer.foot { font-size: 0.64rem; letter-spacing: 2px; }
@@ -430,6 +456,7 @@
             <button type="button" id="loginBtn" class="btn btn-primary">Sign in</button>
           </div>
           <p class="status" id="loginStatus"></p>
+          <button type="button" class="btn" id="loginNeedCode" style="display:none;">I have a code — confirm my email</button>
         </section>
       </div>
     </header>
@@ -500,7 +527,7 @@
     <section class="card" id="accountsCard" style="display:none; margin-top:16px;">
       <h2><span class="num">ID</span>ACCOUNTS <span class="live" style="margin-left:10px;" id="pendingBadge" hidden><i></i><span id="pendingCount">0</span>&nbsp;PENDING</span></h2>
       <div id="acctList"><div class="sys-sub">Loading&hellip;</div></div>
-      <p class="hint">User signups start instantly. Admin signups stay pending until you approve them here.</p>
+      <p class="hint">Every account needs an email address. User signups confirm it with a 6-digit code and need no approval - an <b>Unverified</b> row is waiting on the applicant, not on you. Admin signups stay pending until you approve them here, and the applicant is emailed the decision automatically. The super admin is the built-in owner account: no admin can remove it, and it is the way back in if every other admin is ever lost.</p>
       <div class="proj-actions">
         <button type="button" class="btn" id="notifyTestBtn">Send test e-mail</button>
       </div>
@@ -575,20 +602,63 @@
     <div class="modal">
       <div class="modal-head">
         <strong>CREATE ACCOUNT</strong>
-        <div class="modal-path">User accounts start right away. Admin accounts need approval.</div>
+        <div class="modal-path">Every account needs an email address. Users confirm it with a code and are straight in; admins also need approval.</div>
       </div>
       <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
         <input type="text" id="signupUser" placeholder="Username (3-32 chars: letters, numbers, _ or -)" maxlength="32" aria-label="New username" autocomplete="off" />
         <input type="password" id="signupPass" placeholder="Password (4+ chars)" aria-label="New password" autocomplete="new-password" />
+        <input type="email" id="signupEmail" placeholder="Email (required for every account)" aria-label="Email address" autocomplete="email" maxlength="254" />
         <select id="signupRole" aria-label="Requested role">
-          <option value="user">Role: User (instant)</option>
-          <option value="admin">Role: Admin (needs approval)</option>
+          <option value="user">Role: User (confirm by email code)</option>
+          <option value="admin">Role: Admin (code + approval)</option>
         </select>
         <p class="status" id="signupStatus" style="margin:0; min-height:0;"></p>
       </div>
       <div class="modal-foot">
         <button type="button" class="btn" id="signupCancel">Cancel</button>
         <button type="button" class="btn btn-primary" id="signupConfirm">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Email-code step. A User account exists but cannot sign in until the code
+       mailed to the address they gave comes back here. -->
+  <div class="modal-overlay" id="verifyModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong>CONFIRM YOUR EMAIL</strong>
+        <div class="modal-path">Enter the 6-digit code we sent you</div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <p class="hint" id="verifyIntro" style="margin:0;"></p>
+        <input type="text" id="verifyCode" placeholder="6-digit code" aria-label="Verification code"
+               inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+               style="font:600 20px/1 var(--mono); letter-spacing:.32em; text-align:center; padding:12px;" />
+        <p class="status" id="verifyStatus" style="margin:0; min-height:0;"></p>
+        <p class="hint" id="verifyHint" style="margin:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" id="verifyResend">Resend code</button>
+        <button type="button" class="btn" id="verifySkip">Do this later</button>
+        <button type="button" class="btn btn-primary" id="verifyConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="signupOkModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-head">
+        <strong id="okTitle">REQUEST RECEIVED</strong>
+        <div class="modal-path" id="okSub">Waiting for approval</div>
+      </div>
+      <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
+        <p class="signup-ok-msg" id="okMsg"></p>
+        <p class="signup-ok-mail" id="okMail"></p>
+        <p class="status err" id="okWarn" style="margin:0; min-height:0;"></p>
+        <p class="hint" id="okHint" style="margin:0;"></p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-primary" id="okDone">Got it</button>
       </div>
     </div>
   </div>
@@ -614,6 +684,17 @@
     const signupBtn = document.getElementById('signupBtn');
     const signupModal = document.getElementById('signupModal');
     const accountsCard = document.getElementById('accountsCard');
+    // Post-signup confirmation modal. Handles declared here with the other
+    // auth elements rather than beside their functions further down, so
+    // nothing has to reason about ordering relative to the Escape handler.
+    const signupOkModal = document.getElementById('signupOkModal');
+    const okTitle = document.getElementById('okTitle');
+    const okSub = document.getElementById('okSub');
+    const okMsg = document.getElementById('okMsg');
+    const okMail = document.getElementById('okMail');
+    const okWarn = document.getElementById('okWarn');
+    const okHint = document.getElementById('okHint');
+    const okDone = document.getElementById('okDone');
     const isAdmin = () => session.role === 'admin';
     const isSignedIn = () => !!session.username;
 
@@ -1063,29 +1144,34 @@
         if ((admin || mine) && p.usage) {
           extra += usageLine(p);
         }
-        // Header: number, dot, name, then tags pushed to the right.
-        // Status lives in a pill next to the name (no separate STATUS line).
+        // Row 1: number, dot, name (wraps to 2 lines), status pill.
+        // Row 2: path on the left, badges on the right.
+        // Keeping badges off the name's row is what stops long names
+        // from being clipped down to "U...".
+        const fullUrl = location.origin + p.url;
+        const ownerTag = (admin && p.owner)
+          ? '<span class="tag clip" title="' + esc(p.owner) + '">' + esc(p.owner) + '</span>'
+          : '';
         card.innerHTML =
           '<div class="proj-head">' +
             '<span class="pnum">' + num + '</span>' +
             '<span class="dot ' + dotClass + '" title="' + esc(stateLabel) + '"></span>' +
-            '<span class="proj-name">' + esc(p.name) + '</span>' +
+            '<span class="proj-name" title="' + esc(p.name) + '">' + esc(p.name) + '</span>' +
             '<span class="pill ' + dotClass + '">' + esc(stateLabel) + '</span>' +
-            '<span style="margin-left:auto; display:flex; gap:5px;">' +
+          '</div>' +
+          '<div class="proj-meta">' +
+            '<span class="proj-path" title="' + esc(fullUrl) + '">' + esc(p.url) + '</span>' +
+            '<span class="proj-tags">' +
               '<span class="tag">' + esc(typeLabel) + '</span>' +
               (p.locked ? '<span class="tag lock">Locked</span>' : '') +
               (pending ? '<span class="tag pending">Pending</span>' : '') +
-              (admin && p.owner ? '<span class="tag">' + esc(p.owner) + '</span>' : '') +
+              ownerTag +
             '</span>' +
-          '</div>' +
-          '<div class="proj-path" title="' + esc(location.origin + p.url) + '">' +
-            esc(p.url) +
           '</div>' +
           extra +
           '<div class="proj-actions">' +
             (pending ? '' : '<a class="btn btn-open" href="' + esc(p.url) +
-              '" target="_blank" rel="noopener" title="' +
-              esc(location.origin + p.url) + '">Open</a>') +
+              '" target="_blank" rel="noopener" title="' + esc(fullUrl) + '">Open</a>') +
             mid +
             ((admin || mine) && !frozen ? '<button type="button" class="btn btn-danger">Remove</button>' : '') +
           '</div>' +
@@ -1470,6 +1556,12 @@
         } else {
           loginStatus.textContent = data.error || 'Sign in failed.';
           loginStatus.className = 'status err';
+          // The password was right - they just have not proved the address yet.
+          // Offer the code step here rather than making them sign up again.
+          if (data.needsCode) {
+            const btn = document.getElementById('loginNeedCode');
+            if (btn) btn.style.display = '';
+          }
         }
       } catch (e) {
         loginStatus.textContent = 'Error connecting to server.';
@@ -1486,17 +1578,101 @@
       fetchProjects();
     }
 
+    // --- Post-signup confirmation modal (handles declared near the top) ---
+    // Three sentences: what happened, where to look, what to do next.
+    function openSignupOk(data, typedEmail) {
+      if (!signupOkModal) { setStatus(data.message || '', true); return; }
+      const addr = data.email || typedEmail || '';
+      const ack = data.acknowledged !== false;
+
+      if (data.status === 'pending') {
+        okTitle.textContent = 'REQUEST RECEIVED';
+        okSub.textContent = 'Waiting for approval';
+        okMsg.textContent = ack
+          ? 'Your admin request was submitted. An administrator has to approve it before you can sign in.'
+          : 'Your admin request was submitted, but we could not email you about it.';
+        okHint.textContent = ack
+          ? 'Check your spam folder if nothing arrives in a few minutes.'
+          : 'Ask the administrator directly if you need to know sooner.';
+      } else {
+        okTitle.textContent = 'ACCOUNT CREATED';
+        okSub.textContent = 'Ready to sign in';
+        okMsg.textContent = ack
+          ? 'Your account is active now — no approval needed.'
+          : 'Your account is active now.';
+        okHint.textContent = 'Sign in with the username and password you just chose.';
+      }
+
+      okMail.textContent = addr ? (ack ? 'Confirmation sent to ' + addr : addr) : '';
+      okMail.style.display = addr ? '' : 'none';
+      okThenLogin = data.status !== 'pending';
+
+      // Never claim a confirmation went out when the mail API rejected it.
+      if (ack) {
+        okWarn.textContent = '';
+        okWarn.style.display = 'none';
+      } else {
+        okWarn.textContent = 'We could not send the confirmation email'
+          + (data.emailNotice ? ' (' + data.emailNotice + ')' : '')
+          + '. Write this address down.';
+        okWarn.style.display = '';
+      }
+
+      signupOkModal.style.display = '';
+      lockScroll();
+      if (okDone) setTimeout(() => { try { okDone.focus({ preventScroll: true }); } catch (e) { okDone.focus(); } }, 50);
+    }
+
+    // A user account is usable immediately, so dismissing the popup should
+    // hand them straight to the sign-in form. An admin request cannot be, so
+    // it just closes.
+    let okThenLogin = false;
+
+    function closeSignupOk() {
+      if (signupOkModal) signupOkModal.style.display = 'none';
+      unlockScroll();
+      if (okThenLogin) { okThenLogin = false; openLogin(); }
+    }
+    if (okDone) okDone.addEventListener('click', closeSignupOk);
+    if (signupOkModal) {
+      signupOkModal.addEventListener('click', e => { if (e.target === signupOkModal) closeSignupOk(); });
+    }
+
     // --- Open signup: User starts instantly, Admin waits for approval ---
     const signupUser = document.getElementById('signupUser');
     const signupPass = document.getElementById('signupPass');
+    const signupEmail = document.getElementById('signupEmail');
     const signupRole = document.getElementById('signupRole');
     const signupStatus = document.getElementById('signupStatus');
     const signupConfirm = document.getElementById('signupConfirm');
+const verifyModal = document.getElementById('verifyModal');
+const verifyCode = document.getElementById('verifyCode');
+const verifyIntro = document.getElementById('verifyIntro');
+const verifyStatus = document.getElementById('verifyStatus');
+const verifyHint = document.getElementById('verifyHint');
+const verifyConfirm = document.getElementById('verifyConfirm');
+const verifyResend = document.getElementById('verifyResend');
+const verifySkip = document.getElementById('verifySkip');
+
+    // Loose check to catch typos early; the server validates authoritatively.
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    // Every account needs an address now: a User gets a verification code
+    // there, an Admin gets their decision there. So this no longer depends on
+    // the chosen role - it just marks the field and describes what it is for.
+    function syncEmailRequired() {
+      signupEmail.required = true;
+      signupEmail.placeholder = signupRole.value === 'admin'
+        ? 'Email (required - code and decision are sent here)'
+        : 'Email (required - your code is sent here)';
+    }
+    signupRole.addEventListener('change', syncEmailRequired);
 
     function openSignup() {
       signupUser.value = '';
       signupPass.value = '';
+      signupEmail.value = '';
       signupRole.value = 'user';
+      syncEmailRequired();
       signupStatus.textContent = '';
       signupStatus.className = 'status';
       signupConfirm.disabled = false;
@@ -1512,9 +1688,129 @@
       unlockScroll();
     }
 
+    // --- Confirming an email address with a 6-digit code ---
+    // Deliberately forgiving about the things people actually get wrong: spaces
+    // left in, a code pasted from a mail client, and a resend that has to wait
+    // out a cooldown.
+    let verifyTarget = { username: '', email: '' };
+    let resendAt = 0;
+
+    function openVerify(username, email, sent, notice) {
+      verifyTarget = { username, email };
+      verifyCode.value = '';
+      verifyStatus.textContent = '';
+      verifyStatus.className = 'status';
+      verifyIntro.textContent = 'We sent a 6-digit code to ' + email + '. '
+        + 'Enter it to finish setting up your account.';
+      if (!sent) {
+        // Say it plainly rather than leaving them staring at an empty inbox.
+        verifyStatus.textContent = notice
+          ? 'We could not send the code: ' + notice
+          : 'We could not send the code.';
+        verifyStatus.className = 'status err';
+        verifyHint.textContent = 'Press Resend in a moment, or ask an '
+          + 'administrator to check the mail settings.';
+      } else {
+        verifyHint.textContent = 'The code stops working after 10 minutes.';
+      }
+      verifyModal.style.display = '';
+      lockScroll();
+      setTimeout(() => { try { verifyCode.focus({ preventScroll: true }); } catch (e) { verifyCode.focus(); } }, 50);
+    }
+
+    function closeVerify() {
+      verifyModal.style.display = 'none';
+      unlockScroll();
+    }
+
+    function resendWait() {
+      const left = Math.ceil((resendAt - Date.now()) / 1000);
+      return left > 0 ? left : 0;
+    }
+
+    async function submitVerify() {
+      const code = verifyCode.value.replace(/\D/g, '').slice(0, 6);
+      verifyCode.value = code;
+      if (code.length !== 6) {
+        verifyStatus.textContent = 'Enter all 6 digits.';
+        verifyStatus.className = 'status err';
+        return;
+      }
+      verifyConfirm.disabled = true;
+      verifyConfirm.textContent = 'Checking...';
+      verifyStatus.textContent = '';
+      try {
+        const res = await fetch('/api/verify/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: verifyTarget.username, code })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          closeVerify();
+          loginUser.value = verifyTarget.username;
+          openSignupOk({ message: data.message || 'Email confirmed - you can sign in now.' },
+                       verifyTarget.email);
+        } else {
+          verifyStatus.textContent = data.error || 'That code did not work.';
+          verifyStatus.className = 'status err';
+          if (data.reason === 'expired' || data.reason === 'too_many') {
+            // The code is gone either way, so offer a fresh one immediately.
+            resendAt = 0;
+            verifyHint.textContent = 'Request a new code to carry on.';
+          }
+        }
+      } catch (e) {
+        verifyStatus.textContent = 'Error connecting to server.';
+        verifyStatus.className = 'status err';
+      } finally {
+        verifyConfirm.disabled = false;
+        verifyConfirm.textContent = 'Confirm';
+      }
+    }
+
+    async function resendCode() {
+      const left = resendWait();
+      if (left > 0) {
+        verifyStatus.textContent = 'Wait ' + left + 's before asking for another code.';
+        verifyStatus.className = 'status err';
+        return;
+      }
+      verifyResend.disabled = true;
+      verifyResend.textContent = 'Sending...';
+      try {
+        const res = await fetch('/api/verify/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: verifyTarget.username })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          resendAt = Date.now() + 60000;
+          verifyStatus.textContent = data.message || 'Code sent.';
+          verifyStatus.className = 'status';
+          verifyHint.textContent = 'The newest code replaces any earlier one.';
+          verifyCode.value = '';
+          verifyCode.focus();
+        } else {
+          const wait = data.retryAfter || 0;
+          if (wait) resendAt = Date.now() + wait * 1000;
+          verifyStatus.textContent = data.error || 'Could not send the code.';
+          verifyStatus.className = 'status err';
+        }
+      } catch (e) {
+        verifyStatus.textContent = 'Error connecting to server.';
+        verifyStatus.className = 'status err';
+      } finally {
+        verifyResend.disabled = false;
+        verifyResend.textContent = 'Resend code';
+      }
+    }
+
     async function submitSignup() {
       const username = signupUser.value.trim();
       const password = signupPass.value;
+      const email = signupEmail.value.trim();
       const role = signupRole.value === 'admin' ? 'admin' : 'user';
       if (username.length < 3) {
         signupStatus.textContent = 'Username must be 3+ chars.';
@@ -1528,6 +1824,20 @@
         signupPass.focus();
         return;
       }
+      if (!email) {
+        signupStatus.textContent = role === 'admin'
+          ? 'Admin accounts need an email - the code and the decision are sent there.'
+          : 'An email address is required - your sign-in code is sent there.';
+        signupStatus.className = 'status err';
+        signupEmail.focus();
+        return;
+      }
+      if (!EMAIL_RE.test(email)) {
+        signupStatus.textContent = "That email address doesn't look valid.";
+        signupStatus.className = 'status err';
+        signupEmail.focus();
+        return;
+      }
       signupConfirm.disabled = true;
       signupConfirm.textContent = 'Creating...';
       signupConfirm.classList.add('busy');
@@ -1536,17 +1846,21 @@
         const res = await fetch('/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password, role })
+          body: JSON.stringify({ username, password, role, email })
         });
         const data = await res.json();
         if (data.ok) {
           closeSignup();
-          if (data.status === 'pending') {
-            setStatus('Admin request sent — an admin must approve it before you can sign in.', true);
+          if (data.needsCode) {
+            // A User account exists but is unusable until the code comes back.
+            // No admin is involved at this point or any later point.
+            loginUser.value = username;
+            openVerify(username, email, data.codeSent !== false, data.codeNotice || '');
+          } else if (data.status === 'pending') {
+            openSignupOk(data, email);
           } else {
             loginUser.value = username;
-            setStatus('Account created — sign in below.', true);
-            openLogin();
+            openSignupOk(data, email);
           }
         } else {
           signupStatus.textContent = data.error || 'Could not create account.';
@@ -1573,6 +1887,13 @@
       acctStatus.className = 'status ' + (ok ? 'ok' : 'err');
     }
 
+    // A decision that succeeded but whose e-mail was rejected. Amber, not red:
+    // the account WAS approved, the applicant just wasn't told.
+    function setAcctWarning(msg) {
+      acctStatus.textContent = msg;
+      acctStatus.className = 'status warn';
+    }
+
     async function fetchAccounts() {
       if (!accountsCard || !isAdmin()) return;
       try {
@@ -1588,6 +1909,9 @@
     }
 
     function renderAccounts(accounts) {
+      // Unverified accounts are NOT pending approval - nobody is holding them.
+      // Counting them into the approval badge would tell an admin there is work
+      // to do when there is none.
       const pending = accounts.filter(a => a.status === 'pending');
       if (pendingBadge) pendingBadge.hidden = !pending.length;
       if (pendingCount) pendingCount.textContent = pending.length;
@@ -1604,11 +1928,25 @@
         row.className = 'acct-row';
         const isSelf = a.username === session.username;
         const roleTag = '<span class="tag ' + (a.role === 'admin' ? 'lock' : 'user') + '">' + esc(a.role) + '</span>';
-        const statusTag = a.status === 'pending'
+        // The owner account is marked so it is obvious why it has no Remove.
+        const superTag = a.super
+          ? '<span class="tag lock" title="The built-in owner account. No admin can remove it, including itself.">Super admin</span>'
+          : '';
+        const statusTag = a.status === 'unverified' || a.verified === false
+          ? '<span class="tag pending" title="Nobody is holding this - the applicant just has to enter the code we emailed them.">Unverified</span>'
+          : a.status === 'pending'
           ? '<span class="tag pending">Pending</span>'
           : '<span class="tag">Active</span>';
         let btns = '';
-        if (a.status === 'pending') {
+        if (a.super) {
+          // Not "you" and not removable - it is simply protected.
+          btns = '<span class="sys-sub">(protected)</span>';
+        } else if (a.status === 'unverified' || a.verified === false) {
+          // Waiting on the applicant, not on the admin. So: no Approve button,
+          // and Remove is still offered - an abandoned signup should be
+          // deletable, and keeping it only blocks the username.
+          btns = '<button type="button" class="btn btn-danger" data-op="remove">Remove</button>';
+        } else if (a.status === 'pending') {
           btns = '<button type="button" class="btn btn-primary" data-op="approve">Approve</button>'
             + '<button type="button" class="btn btn-danger" data-op="remove">Reject</button>';
         } else if (!isSelf) {
@@ -1616,8 +1954,16 @@
         } else {
           btns = '<span class="sys-sub">(you)</span>';
         }
+        // A pending admin with no address can't be told the outcome - flag it
+        // so the approver knows to chase the person directly.
+        const mailTag = (a.status === 'pending' && a.role === 'admin' && !a.email)
+          ? '<span class="tag pending" title="No email on file - this requester cannot be emailed the decision">No email</span>' : '';
+        const emailEl = a.email
+          ? '<a class="acct-email" href="mailto:' + esc(a.email) + '" title="' + esc(a.email) + '">' + esc(a.email) + '</a>'
+          : '<span class="acct-email none">no email on file</span>';
         row.innerHTML = '<span class="acct-name">' + esc(a.username) + '</span>'
-          + roleTag + statusTag
+          + roleTag + superTag + statusTag + mailTag
+          + emailEl
           + '<span style="margin-left:auto; display:flex; gap:8px;">' + btns + '</span>';
         const apBtn = row.querySelector('[data-op="approve"]');
         if (apBtn) apBtn.addEventListener('click', () => reviewAccount(a.username, 'approve', apBtn));
@@ -1665,10 +2011,12 @@
           body: JSON.stringify({ requester: session.username })
         });
         const data = await res.json();
-        setAcctStatus(data.message || (data.error || 'Failed.'), !!data.ok);
-        if (!data.ok && data.detail) {
-          setAcctStatus((data.error || 'Failed.') + ' (' + data.detail + ')', false);
-        }
+        let msg = data.message || (data.ok ? 'Sent.' : (data.error || 'Failed.'));
+        // Surface the sending-domain verdict even on success: a test to your
+        // own inbox passes on an unverified domain, which hides a real outage.
+        if (data.domainNote) msg += '  ' + data.domainNote;
+        if (!data.ok && data.detail) msg += ' (' + data.detail + ')';
+        setAcctStatus(msg, !!data.ok);
       } catch (e) {
         setAcctStatus('Error connecting to server.', false);
       } finally {
@@ -1690,7 +2038,8 @@
         });
         const data = await res.json();
         if (data.ok) {
-          setAcctStatus(data.message || 'Done.', true);
+          if (data.warning) setAcctWarning(data.message || 'Done.');
+          else setAcctStatus(data.message || 'Done.', true);
           fetchAccounts();
         } else {
           setAcctStatus(data.error || 'Failed.', false);
@@ -1752,7 +2101,64 @@
     signupConfirm.addEventListener('click', submitSignup);
     signupModal.addEventListener('click', e => { if (e.target === signupModal) closeSignup(); });
     signupPass.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
-    signupUser.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
+signupUser.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
+signupEmail.addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); if (e.key === 'Escape') closeSignup(); });
+
+// The code step: Enter confirms, Escape steps away without losing the account.
+if (verifyConfirm) verifyConfirm.addEventListener('click', submitVerify);
+if (verifyResend) verifyResend.addEventListener('click', resendCode);
+if (verifySkip) verifySkip.addEventListener('click', closeVerify);
+// Reached from a failed sign-in: the password was right, the address is not
+// confirmed yet. Resend first so the code is actually on its way.
+const loginNeedCode = document.getElementById('loginNeedCode');
+if (loginNeedCode) {
+  loginNeedCode.addEventListener('click', async () => {
+    const username = loginUser.value.trim();
+    if (!username) {
+      loginStatus.textContent = 'Enter your username first.';
+      loginStatus.className = 'status err';
+      loginUser.focus();
+      return;
+    }
+    loginNeedCode.disabled = true;
+    loginNeedCode.textContent = 'Sending...';
+    try {
+      const res = await fetch('/api/verify/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await res.json();
+      const wait = data.retryAfter || 0;
+      if (wait) resendAt = Date.now() + wait * 1000;
+      if (data.ok || data.retryAfter) {
+        openVerify(username, '', data.ok !== false,
+                   data.codeNotice || (data.error || ''));
+      } else {
+        loginStatus.textContent = data.error || 'Could not send a code.';
+        loginStatus.className = 'status err';
+      }
+    } catch (e) {
+      loginStatus.textContent = 'Error connecting to server.';
+      loginStatus.className = 'status err';
+    } finally {
+      loginNeedCode.disabled = false;
+      loginNeedCode.textContent = 'I have a code — confirm my email';
+    }
+  });
+}
+if (verifyCode) {
+  // Keep it to digits as it is typed, so the letter-spacing styling never has
+  // to deal with a pasted "abc123".
+  verifyCode.addEventListener('input', () => {
+    const digits = verifyCode.value.replace(/\D/g, '').slice(0, 6);
+    if (verifyCode.value !== digits) verifyCode.value = digits;
+  });
+  verifyCode.addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitVerify();
+    if (e.key === 'Escape') closeVerify();
+  });
+}
     // Search + sort redraw the cached list instantly (no server round-trip)
     if (searchInput) searchInput.addEventListener('input', applyView);
     if (sortSelect) sortSelect.addEventListener('change', applyView);
@@ -1789,6 +2195,13 @@
       }
     });
     document.addEventListener('keydown', (e) => {
+      // The confirmation modal is on top, so Escape must close it first -
+      // otherwise it dismisses the login card underneath and leaves the modal
+      // stranded with no way out but its button.
+      if (e.key === 'Escape' && signupOkModal && signupOkModal.style.display !== 'none') {
+        closeSignupOk();
+        return;
+      }
       if (e.key === 'Escape' && loginCard.style.display !== 'none') loginCard.style.display = 'none';
     });
     fetchProjects();
