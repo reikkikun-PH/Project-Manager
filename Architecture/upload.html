@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Walkthrough — Server Project Manager, how it works</title>
+<meta name="description" content="One project upload followed all the way through, step by step, with a link from each step to the layer of the app where it happens.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Runs before first paint: marks that scripting is available and applies the
+   remembered theme, so a dark-theme reader never sees a white flash on the
+   way between pages. */
+(function () {
+  var r = document.documentElement;
+  r.classList.add("js");
+  try {
+    var t = localStorage.getItem("arch-theme");
+    if (t === "light" || t === "dark") r.setAttribute("data-theme", t);
+  } catch (e) { /* private mode: fall back to the system preference */ }
+})();
+</script>
+</head>
+<body data-hint="Ten steps, from a dragged zip to a link anyone can open. Each one links to the layer it happens in.">
+<div class="wrap">
+
+<header class="top">
+  <div class="bar-progress" aria-hidden="true"><i id="readbar"></i></div>
+  <a class="brand" href="index.html">
+    <span class="brand-mark">SPM</span>
+    <span class="brand-name">Server Project Manager</span>
+  </a>
+  <nav class="nav" aria-label="Sections of this guide">
+    <a href="index.html">Overview</a>
+    <a href="upload.html" aria-current="page">Walkthrough</a>
+    <a href="roles.html">Roles</a>
+    <a href="operations.html">Running it</a>
+  </nav>
+  <div class="bar-actions">
+    <button type="button" class="btn" id="tourBtn">Take the tour</button>
+    <span class="prog" id="prog" hidden></span>
+    <button type="button" class="btn" id="prevBtn" hidden>Back</button>
+    <button type="button" class="btn" id="nextBtn" hidden>Next</button>
+    <button type="button" class="btn" id="tourStop" hidden>Stop</button>
+    <button type="button" class="btn" id="themeBtn" title="Switch between automatic, light and dark">Theme: auto</button>
+  </div>
+</header>
+
+<div class="phead">
+  <p class="eyebrow">02 — Walkthrough</p>
+  <h1>Watch <em>one upload</em> all the way through</h1>
+  <p class="tagline">
+    The clearest way to understand the app is to watch one thing happen from
+    start to finish. Every step says which layer it happens in — follow the
+    link to see that part of the stack light up.
+  </p>
+</div>
+
+<p class="hintline" id="hint" role="status" aria-live="polite">&nbsp;</p>
+
+<main>
+
+<section id="request">
+  <h2>Someone uploads a project</h2>
+  <p class="lede">
+    A real example, start to finish. Nothing here is hypothetical, and nothing
+    happens on the visitor's computer except the drag and drop.
+  </p>
+
+  <ol class="steps" id="walk">
+    <li>
+      <h4>They drag a zip onto the page</h4>
+      <p>The page checks two things first: that the file really is a zip, and that this person has not already used up their two-project allowance.</p>
+      <span class="see">You see: the drop area highlights as you drag over it.</span>
+      <a class="jump" style="--lc:var(--l2);--lcs:var(--l2-soft)" href="index.html#L2">layer 2 &rarr;</a>
+    </li>
+    <li>
+      <h4>They give it a name</h4>
+      <p>A short box asks what to call it. The name becomes the address — <code>Jonil Inventory</code> becomes <code>/p/jonil-inventory/</code>.</p>
+      <span class="see">You see: a small naming box, with the name filled in from the filename if you leave it blank.</span>
+      <a class="jump" style="--lc:var(--l2);--lcs:var(--l2-soft)" href="index.html#L2">layer 2 &rarr;</a>
+    </li>
+    <li>
+      <h4>The zip is sent to the manager</h4>
+      <p>The file is uploaded as-is, up to 200&nbsp;MB. Nothing is unpacked on the visitor's side.</p>
+      <span class="see">You see: a spinner on the Create button.</span>
+      <a class="jump" style="--lc:var(--l3);--lcs:var(--l3-soft)" href="index.html#L3">layer 3 &rarr;</a>
+    </li>
+    <li>
+      <h4>The manager checks who they are</h4>
+      <p>Not by trusting the page, but by looking the name up in the accounts list again. An edited or stale page changes nothing.</p>
+      <span class="see">You see: nothing — this check is invisible unless it fails.</span>
+      <a class="jump" style="--lc:var(--l1);--lcs:var(--l1-soft)" href="index.html#L1">layer 1 &rarr;</a>
+    </li>
+    <li>
+      <h4>It is unpacked safely</h4>
+      <p>Every path inside the zip is checked as it is extracted, so a file cannot escape into the rest of your computer. A single wrapper folder is removed.</p>
+      <span class="see">You see: nothing.</span>
+      <a class="jump" style="--lc:var(--l3);--lcs:var(--l3-soft)" href="index.html#L3">layer 3 &rarr;</a>
+    </li>
+    <li>
+      <h4>The manager works out what it is</h4>
+      <p>Is there a page to show? Then it is a plain website and can be served straight from disk. Or is there something runnable? Then it becomes an app the manager can start and stop for you.</p>
+      <span class="see">You see: nothing yet — the decision shows up on the card.</span>
+      <a class="jump" style="--lc:var(--l3);--lcs:var(--l3-soft)" href="index.html#L3">layer 3 &rarr;</a>
+    </li>
+    <li>
+      <h4>It joins the list, waiting for approval</h4>
+      <p>The project is recorded along with who owns it, marked as waiting. Because the uploader is not an administrator, it does not go live yet.</p>
+      <span class="see">You see: a PENDING badge on the card, and no Open button.</span>
+      <a class="jump" style="--lc:var(--l4);--lcs:var(--l4-soft)" href="index.html#L4">layer 4 &rarr;</a>
+    </li>
+    <li>
+      <h4>Both people get an email</h4>
+      <p>The uploader gets a "we received your request". The administrator gets "a project is waiting for you". The upload itself is not delayed by either message.</p>
+      <span class="see">You see: a short confirmation box telling you to check your email.</span>
+      <a class="jump" style="--lc:var(--l4);--lcs:var(--l4-soft)" href="index.html#L4">layer 4 &rarr;</a>
+    </li>
+    <li>
+      <h4>The administrator approves it</h4>
+      <p>The card shows two buttons instead of the usual ones. One click makes it live — and emails the applicant that decision.</p>
+      <span class="see">You see: Approve and Reject replace the normal actions on that card.</span>
+      <a class="jump" style="--lc:var(--l2);--lcs:var(--l2-soft)" href="index.html#L2">layer 2 &rarr;</a>
+    </li>
+    <li>
+      <h4>Anyone can open it</h4>
+      <p>The link that was waiting now works, for everyone who has the address — on this computer and on the public one.</p>
+      <span class="see">You see: the Open button appears, and the PENDING badge is gone.</span>
+      <a class="jump" style="--lc:var(--l2);--lcs:var(--l2-soft)" href="index.html#L2">layer 2 &rarr;</a>
+    </li>
+  </ol>
+
+  <div class="note" style="--nc:var(--accent);--ncs:var(--accent-soft);margin-top:26px">
+    <p>
+      <b>Notice what did not happen.</b> The visitor's own computer never unpacked
+      anything, never ran anything, and never trusted the page it was given.
+      Every decision was made again by the manager, at the moment it mattered.
+      <a href="roles.html">See what each role is allowed to do &rarr;</a>
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <nav class="pager" aria-label="Next and previous page">
+    <a href="index.html">
+      <span class="dir">Previous</span>
+      <span class="to">Overview — the four layers</span>
+    </a>
+    <a href="roles.html">
+      <span class="dir">Next</span>
+      <span class="to">Roles — who can do what</span>
+    </a>
+  </nav>
+  <p style="margin-top:26px">
+    This guide describes how the app behaves, not how it is written. It is
+    documentation only: it is never served by the app, and nothing in the app
+    reads it. If the app's behaviour changes, these pages need updating with it.
+  </p>
+</footer>
+
+</div>
+
+<button type="button" class="btn" id="topBtn" title="Back to top" aria-label="Back to top">&uarr;</button>
+
+<script src="app.js"></script>
+</body>
+</html>

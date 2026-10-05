@@ -8,6 +8,11 @@ Cloudflare tunnel — every project lives at `/p/<id>/` on the same link.
   `projects.example.json`, `README.md`, `.gitignore`.
 - **Works on a phone.** Termux/Android, ARM included — the same code.
 
+> **New here?** [`Architecture/index.html`](Architecture/index.html) is an
+> interactive 3D map of how it all fits together, written for people who don't
+> read code. Open it in a browser — no server needed. It is documentation only
+> and is never served by the app.
+
 ---
 
 ## Quick start
@@ -31,8 +36,18 @@ cd ~/pm && python host.py
 One terminal then runs the backend **and** the tunnel, printing the pinned public
 link (`https://xxxx.trycloudflare.com`) and a link per project. Ctrl+C stops both.
 
-The dashboard is at `http://localhost:8000` — sign in with **`admin` / `admin123`**
-unless you set your own in `credentials.json`.
+The dashboard is at `http://localhost:8000` — sign in with
+**`superadmin` / `admin123`** unless you set your own in `credentials.json`.
+
+`superadmin` is the **super admin**: the built-in owner account, and the only
+one that can never be removed from the accounts list. That is deliberate — if
+every admin account were ever removed there would be nothing left to sign in
+with and no way to create a new admin. Keep its password somewhere safe, and do
+not reuse it elsewhere.
+
+Writing `credentials.json` yourself? Give that account `"super": true`. Older
+files containing only a plain `admin` account are upgraded automatically the
+first time the server reads them.
 
 ### Per-project resource usage
 
@@ -98,15 +113,19 @@ locally stays local and browsing via the tunnel keeps the tunnel link.
 - **Upload a `.zip`** → it's extracted, its entry point is detected, and it becomes a
   site at `/p/<id>/` automatically.
 - **One tunnel for everything.** Per-project public links share a single address.
-- **Accounts with roles.** Anyone can sign up; **admin** requests and **project
-  uploads** wait for approval.
+- **Accounts with roles.** Anyone can sign up with an email address. A **user**
+  confirms it with a 6-digit code and is straight in — no approval, nobody to
+  wait on. **admin** requests and **project uploads** wait for approval.
 - **Hardware panel** — CPU (with ARM/SoC model), RAM, disk, GPU, uptime.
 
 ### Approval e-mails (optional)
 
-When someone requests **admin access** or **approves-pending project upload**, the
-manager can email you so you don't have to keep the dashboard open. It uses the
-[Resend](https://resend.com) HTTP API with the stdlib — no extra packages.
+When someone requests **admin access** or **uploads a project waiting for approval**,
+the manager can email you so you don't have to keep the dashboard open. It uses a
+hosted email API over plain HTTP with the stdlib — no extra packages.
+
+Two providers are supported. **Brevo is the default** because it needs no domain
+of your own; Resend is kept as an alternative.
 
 Create `notify.json` next to your state (it is gitignored, so the key is never
 uploaded):
@@ -114,24 +133,162 @@ uploaded):
 ```json
 {
   "enabled": true,
-  "resendApiKey": "re_...",
-  "to": "you@example.com",
-  "from": "Project Manager <onboarding@resend.dev>"
+  "provider": "brevo",
+  "brevoApiKey": "xkeysib-...",
+  "from": "Project Manager <you@gmail.com>",
+  "to": "you@example.com"
 }
 ```
 
-Or set `RESEND_API_KEY` and `NOTIFY_TO` as environment variables instead.
+Or set `BREVO_API_KEY` and `NOTIFY_TO` as environment variables instead.
+
+#### Brevo (recommended — no domain needed)
+
+[Brevo](https://brevo.com)'s free plan sends **300 emails/day** and, crucially,
+lets you register a sender by confirming a 6-digit code sent to that address.
+So `you@gmail.com` becomes a legitimate sender **without any DNS records**, and
+can then mail anyone. Steps:
+
+1. Sign up at brevo.com → **Settings → Senders & Domains → Add a new sender**.
+2. Enter your address, confirm the 6-digit code Brevo emails you.
+3. **SMTP & API → API Keys → Generate a new key**, and put it in `notify.json`.
+
+The `from` address **must be a sender registered on the account** — Brevo rejects
+anything else with a 400. `Send test e-mail` in the ACCOUNTS card checks this and
+tells you before a real approval is affected.
+
+**Trade-off:** a `gmail.com` sender can't be DKIM- or SPF-authenticated, so some
+of these land in spam. Authenticating a domain (or using a provider that supports
+Brevo's SMTP relay with a custom domain) fixes it. The test e-mail reports this
+so it isn't a surprise.
+
+#### Resend (alternative — needs a verified domain)
+
+```json
+{
+  "enabled": true,
+  "provider": "resend",
+  "resendApiKey": "re_...",
+  "from": "Project Manager <notifications@yourdomain.com>",
+  "to": "you@example.com"
+}
+```
+
+Set `provider` to `"resend"` (or drop `brevoApiKey`) to switch. Keep both keys in
+the file if you like — the `provider` key picks one.
+
+Resend's shared `onboarding@resend.dev` domain is **testing-only**: it may only
+send to the address on your Resend account, and returns HTTP 403 for anyone else.
+Verify your own domain at resend.com/domains before using this for real mail.
 
 What gets emailed:
 
-| Trigger | Email |
-|---|---|
-| Signup asking for the **admin** role | username, where to approve it, and the session link |
-| A **user** account signup | username, and a note that it's active immediately |
-| A **user's** project upload (waiting for approval) | project name, id, type, owner, and where it will be live |
-| An **admin** upload | *nothing* — it goes live immediately |
+| Trigger | Sent to | Email |
+|---|---|---|
+| Signup asking for the **admin** role | you | username, their email, where to approve it, and the session link |
+| The same signup, **to the applicant** | **them** | "we received your request, wait here for the decision" |
+| A **user** account signup | you | username, their email, and a note that it is waiting on their code |
+| A **user** account signup, **the code** | **them** | the 6-digit code, what it is for, and how long it lasts |
+| A **user's** project upload (waiting for approval) | you | project name, id, type, owner, and where it will be live |
+| An **admin** upload | — | *nothing* — it goes live immediately |
+| You **approve** an admin request | **the applicant** | approved — sign in now, with the link |
+| You **reject** an admin request | **the applicant** | declined, and who decided it |
 
-Verify it end to end from the dashboard: sign in as admin → **ACCOUNTS** →
+An applicant therefore gets **two** messages for an admin request: an
+acknowledgement ("we got it, wait") and later the decision ("approved" or
+"declined"). The acknowledgement matters because without it someone who signs
+up has no way to know their request even arrived.
+
+### The confirmation popup after signup
+
+Submitting the form pops up a short modal — **REQUEST RECEIVED / Waiting for
+approval** for an admin request, **EMAIL CONFIRMED / Ready to sign in** once a
+user has entered their code. It says what happened, which address it went to,
+and what to do next. One button dismisses it; Escape or a click outside works
+too.
+
+A **user** signup goes somewhere else first: straight to **CONFIRM YOUR EMAIL**,
+with a box for the 6-digit code, a **Resend** button and **Do this later** —
+they are not asked to wait for an approval that will never come. If the code
+could **not** be sent, that screen says so in red and explains that the account
+cannot be used until a code arrives; it never claims to have sent something the
+mail API rejected. Registration still succeeds either way, because a mail outage
+must not block someone signing up — but unlike before, the account is not usable
+until the code lands, and the screen is explicit about that.
+
+If the code e-mail could not be sent, the signup modal's red warning tells them
+to write the address down.
+
+### Every account needs an email address, and users confirm it with a code
+
+Signup asks for an email address and it is **required for every account**.
+
+- A **user** signs up with an address, gets a **6-digit code** emailed to it, and
+  enters the code. That is the whole approval process — no administrator is
+  involved at any point. Until the code comes back the account exists but
+  **cannot sign in**, so nobody can register using an address they do not own.
+- An **admin** request is treated as already verified: its gate is a human
+  approver, not a code, so it is queued as **PENDING** exactly as before.
+
+Emails are stored lower-cased on the account (`credentials.json`) and must be
+unique across accounts, so one person cannot hold several identities the
+approver can't tell apart.
+
+**UNVERIFIED** in the ACCOUNTS card is a distinct state from **PENDING**, and the
+difference matters: *pending* means a human is holding it up, *unverified* means
+nobody is — the applicant just has not entered the code yet. Unverified rows are
+therefore **not** counted by the pending badge and have **no Approve button**,
+because approving them would hand out a working account for an unproven address.
+They do keep a **Remove** button, so an abandoned signup can be cleared and the
+username freed.
+
+Accounts created before verification existed have no `verified` key and are
+**treated as verified**, so upgrading never locks an existing install out of its
+own dashboard. A pending admin with no address is tagged **NO EMAIL** in the list
+so you know to tell them yourself.
+
+#### How the code is handled
+
+- Six digits from the CSPRNG, digits only — no `O`/`0` or `1`/`l` to mistype.
+- The code is **never stored**. Only a salted SHA-256 hash is kept, in memory,
+  so a dump of the running process cannot be replayed as a sign-in.
+- Valid for **10 minutes**, then it must be requested again.
+- **Five wrong guesses** burn the code. Six digits is a million combinations, so
+  this is what stops guessing.
+- **60-second cooldown** between sends, and **5 codes per account per hour**, so
+  the endpoint cannot be used to mail-bomb an address.
+- Codes live in memory only: restarting the server invalidates them. That costs
+  one **Resend** click, which is why the popup offers it.
+- The mail is sent **synchronously** and the response reports what the mail API
+  actually said. If the code could not be sent you are told so plainly and given
+  a resend button, rather than being left staring at an empty inbox.
+
+If someone reaches the code step from a failed sign-in (their password was right,
+their address is not confirmed), the login card grows an **"I have a code"**
+button so they never have to sign up again.
+
+
+Removing an *active* account sends no "declined" mail — declining a request and
+revoking access are different things, and only the first is a decision on an
+application.
+
+#### Decision e-mails are verified, not assumed
+
+Approving or rejecting sends synchronously and reports what the mail API
+**actually accepted**. If the send is rejected the approval still stands — you
+are never locked out by a mail failure — but the ACCOUNTS card turns amber and
+says so, naming the cause. With Brevo, a bad `from` looks like this:
+
+> Approved `bob`, but `bob@example.com` was **NOT** emailed — the `from` address
+> is not a verified Brevo sender — add and confirm it under Settings > Senders &
+> Domains. Tell them yourself.
+
+Common causes get specific advice: an unregistered `from`, a bad API key, rate
+limiting, or a sandbox-domain restriction. Only decision e-mails are synchronous;
+uploads and signup notifications stay fire-and-forget so a slow mail API can never
+delay them.
+
+Verify it end to end from the dashboard: sign in as superadmin → **ACCOUNTS** →
 **Send test e-mail**. Every attempt (sent or failed) is also appended to
 `notify.log`, so you can check delivery history without a console:
 
@@ -142,18 +299,25 @@ cat notify.log          # or: type notify.log   on Windows
 Notes:
 
 - If a test e-mail arrives but an approval one doesn't, the difference is *which*
-  trigger fired: admin uploads send nothing because they need no approval.
-- **Check spam/quarantine too.** Mail from the shared `onboarding@resend.dev`
-  domain is very likely to be filtered by Gmail. Verifying your own domain in
-  Resend and using it as `from` is the reliable fix.
-- A successful send means Resend accepted the message, not that Gmail delivered
-  it. The Resend dashboard (Emails → Logs) shows per-message delivery status.
+  trigger fired: admin uploads send nothing because they need no approval, and a
+  decision e-mail only goes out when the account actually has an address on file.
+- **A successful send means the provider accepted the message, not that it was
+  delivered.** Both Brevo (Emails → Logs) and Resend (Emails → Logs) show
+  per-message delivery status. Check spam/quarantine too.
+- **Free sender domains cost you deliverability.** Sending as `you@gmail.com`
+  carries no DKIM/SPF, so expect a share of messages in spam. Authenticate a
+  domain when this project needs to be reliable.
 
 - Sending happens in a background thread with a 12s timeout, so a slow or broken mail
   API never delays an upload; failures are only written to the server log
-  (`[Notify] FAILED: …`).
-- `from` must be a domain you verified in Resend. `onboarding@resend.dev` only works
-  for sending to your own Resend account email — use your own domain for anyone else.
+  (`[Notify] FAILED: …`). Approval decisions are the exception — see above.
+- Links in e-mails are probed for liveness before being printed, so a mail never
+  advertises a dead tunnel. The first check after startup waits up to 9s for a
+  verdict rather than falling back to a `127.0.0.1` link.
+- `from` must be a registered sender on the provider. Brevo rejects an unknown
+  one with a 400; Resend's `onboarding@resend.dev` only works for your own
+  Resend account address. This matters most for **decision e-mails**, which go to
+  other people's addresses and are rejected outright without a proper sender.
 - For an extra instance, copy `notify.json` into that instance's data folder
   (`instances/<name>/`) or export the env vars before starting it.
 
@@ -359,7 +523,7 @@ chmod +x ~/.termux/boot/start-pm.sh
 | Tunnel fails with `no such host` | No working DNS — reconnect, then re-run `host.py` (it retries 3×) |
 | App exits with `ModuleNotFoundError` | Press **Run** again — `requirements.txt` installs automatically |
 | `Port 810x is already in use` | The manager auto-bumps to a free port and saves it; or **Stop** the other project |
-| Project stuck "awaiting approval" | Sign in as admin → **ACCOUNTS** → Approve |
+| Project stuck "awaiting approval" | Sign in as superadmin → **ACCOUNTS** → Approve |
 | Page shows old content | Restart the server; the dashboard also auto-refreshes every 30s |
 
 ---

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Overview — Server Project Manager, how it works</title>
+<meta name="description" content="What Server Project Manager is, the four layers it is built from, and the three kinds of project it can host.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Runs before first paint: marks that scripting is available and applies the
+   remembered theme, so a dark-theme reader never sees a white flash on the
+   way between pages. */
+(function () {
+  var r = document.documentElement;
+  r.classList.add("js");
+  try {
+    var t = localStorage.getItem("arch-theme");
+    if (t === "light" || t === "dark") r.setAttribute("data-theme", t);
+  } catch (e) { /* private mode: fall back to the system preference */ }
+})();
+</script>
+</head>
+<body data-hint="Pick a role to see what that person can and cannot do.">
+<div class="wrap">
+
+<header class="top">
+  <div class="bar-progress" aria-hidden="true"><i id="readbar"></i></div>
+  <a class="brand" href="index.html">
+    <span class="brand-mark">SPM</span>
+    <span class="brand-name">Server Project Manager</span>
+  </a>
+  <nav class="nav" aria-label="Sections of this guide">
+    <a href="index.html" aria-current="page">Overview</a>
+    <a href="upload.html">Walkthrough</a>
+    <a href="roles.html">Roles</a>
+    <a href="operations.html">Running it</a>
+  </nav>
+  <div class="bar-actions">
+    <button type="button" class="btn" id="tourBtn">Take the tour</button>
+    <span class="prog" id="prog" hidden></span>
+    <button type="button" class="btn" id="prevBtn" hidden>Back</button>
+    <button type="button" class="btn" id="nextBtn" hidden>Next</button>
+    <button type="button" class="btn" id="tourStop" hidden>Stop</button>
+    <button type="button" class="btn" id="themeBtn" title="Switch between automatic, light and dark">Theme: auto</button>
+  </div>
+</header>
+
+<div class="phead">
+  <p class="eyebrow">01 — Overview</p>
+  <h1>One address, <em>many projects</em></h1>
+  <p class="tagline">
+    One small program hosts many projects on a single web address.
+    Drop in a folder, get a link, share it. Nothing to install, nothing to build.
+  </p>
+  <div class="facts">
+    <span class="fact">Every project at <b>/p/&lt;name&gt;/</b></span>
+    <span class="fact">Plain websites and <b>real apps</b></span>
+    <span class="fact">Accounts with <b>admin approval</b></span>
+    <span class="fact">Runs on <b>Windows, Linux and Android</b></span>
+  </div>
+</div>
+
+<div class="subbar">
+  <span class="lbl">View as</span>
+  <div class="roles" role="group" aria-label="View the app as a particular role">
+    <button type="button" class="role" data-role="visitor" aria-pressed="false" style="--rc:var(--l1)"><span class="sw"></span>Visitor</button>
+    <button type="button" class="role" data-role="user" aria-pressed="false" style="--rc:var(--l2)"><span class="sw"></span>User</button>
+    <button type="button" class="role" data-role="admin" aria-pressed="false" style="--rc:var(--l3)"><span class="sw"></span>Admin</button>
+  </div>
+  <div class="toc" aria-label="On this page">
+    <a href="#layers" aria-current="true">The four layers</a>
+    <a href="#open">Three kinds of project</a>
+  </div>
+</div>
+<p class="hintline" id="hint" role="status" aria-live="polite">&nbsp;</p>
+
+<main>
+
+<section id="layers">
+  <h2>The four layers</h2>
+  <p class="lede">
+    Everything the app does fits in four shelves, stacked in the order a request
+    travels: someone uses it, they do something, the manager makes it happen,
+    and occasionally an outside service is involved. Pick a role above to dim
+    the parts that role cannot reach.
+  </p>
+
+  <div class="layers">
+
+    <div class="layer" id="L1" style="--lc:var(--l1);--lcs:var(--l1-soft)">
+      <div class="layer-head">
+        <span class="step">Layer 1</span>
+        <h3>Who uses it</h3>
+      </div>
+      <p>Three kinds of visitor. The only difference between them is a role, and it is checked afresh on every single action.</p>
+      <div class="cards">
+        <div class="card" data-roles="visitor">
+          <h4>Anyone who opens the link</h4>
+          <p>Sees the list of approved projects and nothing else. Every button that would change something is hidden.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user">
+          <h4>A signed-in user</h4>
+          <p>Can upload projects, up to two. Each new upload waits for an administrator before anyone else can open it.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="admin">
+          <h4>An administrator</h4>
+          <p>Full control: approve accounts and projects, start and stop apps, lock projects, and see how busy the computer is.</p>
+          <p class="no">Not your role</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="between">they ask the manager to do something<span class="stem"></span></div>
+
+    <div class="layer" id="L2" style="--lc:var(--l2);--lcs:var(--l2-soft)">
+      <div class="layer-head">
+        <span class="step">Layer 2</span>
+        <h3>What you can do</h3>
+      </div>
+      <p>The things a person can actually do, grouped the way they appear on the dashboard.</p>
+      <div class="cards">
+        <div class="card" data-roles="user admin">
+          <h4>Sign in and accounts</h4>
+          <p>Sign in, sign up, and — for administrators — approve accounts, reject them, or remove them.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user admin">
+          <h4>Add and manage projects</h4>
+          <p>Create, rename, start, stop, approve, reject, delete — and save a launcher that opens one on any computer.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user admin">
+          <h4>Upload a project</h4>
+          <p>Drag a zip onto the page. It is unpacked safely, worked out whether it is a website or an app, and added to your list.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="visitor user admin">
+          <h4>Open a project</h4>
+          <p>Every project gets its own address, whether it is a plain website or an app running on your computer.</p>
+          <p class="no">Not your role</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="between">the manager does the work<span class="stem"></span></div>
+
+    <div class="layer" id="L3" style="--lc:var(--l3);--lcs:var(--l3-soft)">
+      <div class="layer-head">
+        <span class="step">Layer 3</span>
+        <h3>How it works</h3>
+      </div>
+      <p>
+        The machinery. Almost everything passes through <b>the manager</b> — one
+        self-contained program that talks to your computer's operating system and
+        keeps its records in ordinary files.
+      </p>
+      <div class="cards">
+        <div class="card" data-roles="visitor user admin">
+          <h4>Keeps everything in files</h4>
+          <p>Accounts, the project list, the project files, passwords and settings are all small files in one folder. There is no database.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user admin">
+          <h4>Runs your apps</h4>
+          <p>Starts each app as its own separate program on its own port, so several can share one computer without colliding.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="visitor user admin">
+          <h4>The manager</h4>
+          <p>Serves the dashboard, decides who may do what, runs and stops apps, serves files, and sends the emails. All in one place.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user admin">
+          <h4>Sends emails</h4>
+          <p>Tells you about new sign-ups and uploads, and tells applicants whether their admin request was approved or declined.</p>
+          <p class="no">Not your role</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="between">occasionally needs something this computer cannot do alone<span class="stem"></span></div>
+
+    <div class="layer" id="L4" style="--lc:var(--l4);--lcs:var(--l4-soft)">
+      <div class="layer-head">
+        <span class="step">Layer 4</span>
+        <h3>Outside services</h3>
+      </div>
+      <p>Three things that live elsewhere. All are optional — without them the app still runs, you just share by another route and check the dashboard yourself.</p>
+      <div class="cards">
+        <div class="card" data-roles="visitor user admin">
+          <h4>The public web address</h4>
+          <p>A free address on the internet that forwards to your computer. Nothing is opened on your router and no port is exposed.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="visitor user admin">
+          <h4>Your hosted projects</h4>
+          <p>What is being served right now: four plain websites, and VerifID — a face-recognition app with its own models and logs.</p>
+          <p class="no">Not your role</p>
+        </div>
+        <div class="card" data-roles="user admin">
+          <h4>The email service</h4>
+          <p>Delivers the approval and decision emails. Its free plan needs no domain of your own, which is why it was chosen.</p>
+          <p class="no">Not your role</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p style="margin-top:18px">
+    <a href="upload.html">Follow a single upload through all four layers &rarr;</a>
+  </p>
+</section>
+
+<section id="open">
+  <h2>The three kinds of project</h2>
+  <p class="lede">
+    One address, three different jobs. This is the part that surprises people,
+    so it is worth spelling out.
+  </p>
+
+  <details style="--lc:var(--l2);--lcs:var(--l2-soft)" open>
+    <summary>A plain website <span class="tag">cheapest</span></summary>
+    <div class="body">
+      <p>
+        The file is read straight off disk and handed back. No program is
+        started, no port is used, nothing is left running in the background.
+        This is the most reliable kind of hosted project.
+      </p>
+      <p>Four of the five current projects are of this kind.</p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l3);--lcs:var(--l3-soft)">
+    <summary>An app the manager runs <span class="tag">real program</span></summary>
+    <div class="body">
+      <p>
+        Pressing Run starts a real, separate program — a Python app, a Node app —
+        on its own port, and writes its output to log files. It is told which
+        port to listen on.
+      </p>
+      <p>
+        Opening the project then <b>passes the request through</b> to that
+        program and brings the answer back. Visitors only ever see
+        <code>/p/verifid/</code>; they never see or need the port.
+      </p>
+      <p>
+        Each app gets its own port from a reserved block, and the manager's own
+        port is never handed out, so two projects cannot collide on one computer.
+      </p>
+      <p>
+        <b>VerifID</b> — a face-recognition app with its own models, photos and
+        attendance logs — is the one running this way now.
+      </p>
+      <p>
+        Anything the app needs to install is set up the first time it starts,
+        which can take a while and needs the internet.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l4);--lcs:var(--l4-soft)">
+    <summary>An app you already started yourself <span class="tag">bring your own</span></summary>
+    <div class="body">
+      <p>
+        The same pass-through, but the manager never starts anything — you point
+        it at a port something else is already listening on. Useful for something
+        you run yourself and want on the same address.
+      </p>
+    </div>
+  </details>
+
+  <div class="note" style="--nc:var(--accent);--ncs:var(--accent-soft)">
+    <p>
+      <b>Why all three share one address.</b> Each project is mounted under
+      <code>/p/&lt;name&gt;/</code>, and the manager works out which of the three
+      to do from the project list. That is why a link keeps working whether you
+      are on this computer or on the public address — and why links inside a
+      project don't break when you share them.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <nav class="pager" aria-label="Next and previous page">
+    <a href="upload.html">
+      <span class="dir">Next</span>
+      <span class="to">Walkthrough — follow one upload</span>
+    </a>
+  </nav>
+  <p style="margin-top:26px">
+    This guide describes how the app behaves, not how it is written. It is
+    documentation only: it is never served by the app, and nothing in the app
+    reads it. If the app's behaviour changes, these pages need updating with it.
+  </p>
+</footer>
+
+</div>
+
+<button type="button" class="btn" id="topBtn" title="Back to top" aria-label="Back to top">&uarr;</button>
+
+<script src="app.js"></script>
+</body>
+</html>

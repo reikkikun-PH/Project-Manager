@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roles — Server Project Manager, how it works</title>
+<meta name="description" content="What a visitor, a signed-in user and an administrator can each do, and why hiding a button is never the real protection.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Runs before first paint: marks that scripting is available and applies the
+   remembered theme, so a dark-theme reader never sees a white flash on the
+   way between pages. */
+(function () {
+  var r = document.documentElement;
+  r.classList.add("js");
+  try {
+    var t = localStorage.getItem("arch-theme");
+    if (t === "light" || t === "dark") r.setAttribute("data-theme", t);
+  } catch (e) { /* private mode: fall back to the system preference */ }
+})();
+</script>
+</head>
+<body data-hint="Pick a role to narrow the table to that one column.">
+<div class="wrap">
+
+<header class="top">
+  <div class="bar-progress" aria-hidden="true"><i id="readbar"></i></div>
+  <a class="brand" href="index.html">
+    <span class="brand-mark">SPM</span>
+    <span class="brand-name">Server Project Manager</span>
+  </a>
+  <nav class="nav" aria-label="Sections of this guide">
+    <a href="index.html">Overview</a>
+    <a href="upload.html">Walkthrough</a>
+    <a href="roles.html" aria-current="page">Roles</a>
+    <a href="operations.html">Running it</a>
+  </nav>
+  <div class="bar-actions">
+    <button type="button" class="btn" id="tourBtn">Take the tour</button>
+    <span class="prog" id="prog" hidden></span>
+    <button type="button" class="btn" id="prevBtn" hidden>Back</button>
+    <button type="button" class="btn" id="nextBtn" hidden>Next</button>
+    <button type="button" class="btn" id="tourStop" hidden>Stop</button>
+    <button type="button" class="btn" id="themeBtn" title="Switch between automatic, light and dark">Theme: auto</button>
+  </div>
+</header>
+
+<div class="phead">
+  <p class="eyebrow">03 — Roles</p>
+  <h1>Hiding a button is <em>not</em> the protection</h1>
+  <p class="tagline">
+    Three roles, checked afresh on every single action. Pick one to narrow the
+    table to just that column — and the layers it applies to over on the
+    <a href="index.html">overview</a>.
+  </p>
+</div>
+
+<div class="subbar">
+  <span class="lbl">View as</span>
+  <div class="roles" role="group" aria-label="Narrow the table to one role">
+    <button type="button" class="role" data-role="visitor" aria-pressed="false" style="--rc:var(--l1)"><span class="sw"></span>Visitor</button>
+    <button type="button" class="role" data-role="user" aria-pressed="false" style="--rc:var(--l2)"><span class="sw"></span>User</button>
+    <button type="button" class="role" data-role="admin" aria-pressed="false" style="--rc:var(--l3)"><span class="sw"></span>Admin</button>
+  </div>
+</div>
+<p class="hintline" id="hint" role="status" aria-live="polite">&nbsp;</p>
+
+<main>
+
+<section id="roles">
+  <h2>Who can do what</h2>
+  <p class="lede">
+    Every one of these is checked again at the moment you press it, so editing
+    the page changes nothing. A visitor who deletes a button in their own browser
+    has still deleted nothing.
+  </p>
+  <div class="tbl-wrap">
+  <table class="tbl lens-table" id="permTable">
+    <caption class="sr-only">Actions available to each role</caption>
+    <thead>
+      <tr><th scope="col">Action</th><th scope="col">Visitor</th><th scope="col">User</th><th scope="col">Admin</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>See approved projects</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+      <tr><td>Upload a project</td><td class="no">No</td><td class="yes">Yes, up to 2</td><td class="yes">Yes</td></tr>
+      <tr><td>Start and stop an app</td><td class="no">No</td><td class="yes">Own projects</td><td class="yes">All</td></tr>
+      <tr><td>Approve a project</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+      <tr><td>Approve an admin account</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+      <tr><td>Lock and unlock a project</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+      <tr><td>See computer specs</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+      <tr><td>Confirm an email address by code</td><td class="no">No</td><td class="yes">Own account</td><td class="yes">Own account</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="font-size:14px;color:var(--muted);margin-top:16px" id="permNote">
+    An upload made by an administrator skips the approval queue and goes live
+    immediately.
+  </p>
+</section>
+
+<section id="whylens">
+  <h2>How the check actually works</h2>
+  <p class="lede">
+    The role lens above is a reading aid, not the mechanism. It is worth being
+    precise about what is really doing the work.
+  </p>
+
+  <details style="--lc:var(--l1);--lcs:var(--l1-soft)" open>
+    <summary>Every action is re-checked at the moment it happens <span class="tag">the real protection</span></summary>
+    <div class="body">
+      <p>
+        When you press a button, the manager looks up who you are <b>again</b>,
+        using the account list it holds itself — not anything the page told it.
+        A tampered page, a stale page or a hand-written request all arrive at the
+        same check, and all three are turned away the same way.
+      </p>
+      <p>
+        This is why the buttons being hidden is a convenience rather than a
+        safeguard. Hiding them makes the dashboard easier to read; refusing the
+        action is what makes it safe.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l3);--lcs:var(--l3-soft)">
+    <summary>Signing in does not survive a refresh <span class="tag">surprising</span></summary>
+    <div class="body">
+      <p>
+        The session lives in the page rather than in a cookie, so reloading signs
+        you out and every action is re-checked from scratch. Two browser tabs are
+        two separate sessions: being an administrator in one does nothing for the
+        other.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l4);--lcs:var(--l4-soft)">
+    <summary>Locking a project hides buttons, not the site <span class="tag">easy to misread</span></summary>
+    <div class="body">
+      <p>
+        Anyone who already has the address can still open the project. Lock stops
+        the dashboard's controls being used — it is not a way of keeping people
+        off the link. If you need the link itself to be private, that is a
+        different job, and the app will tell you so rather than pretend.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l3);--lcs:var(--l3-soft)">
+    <summary>The last administrator cannot be removed <span class="tag">deliberate</span></summary>
+    <div class="body">
+      <p>
+        Neither can the one removing themselves. The guard is on purpose, so the
+        dashboard cannot end up with nobody able to administer it.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l1);--lcs:var(--l1-soft)" open>
+    <summary>One account is the super admin, and cannot be deleted <span class="tag">owner</span></summary>
+    <div class="body">
+      <p>
+        There is one built-in account, <code>superadmin</code>, that comes with
+        the app rather than being created through signup. It is marked
+        <b>Super admin</b> in the accounts list and has no Remove button at all.
+      </p>
+      <p>
+        <b>No administrator can remove it</b> — not another admin, and not itself.
+        Every other account on the list can be removed by any admin, including
+        other admins; this one cannot be removed by anyone.
+      </p>
+      <p>
+        The reason is simple: if the last usable admin account could be deleted,
+        there would be nothing left to sign in with and no way to create a new
+        one. The app would be permanently unadministrable, with no way back short
+        of editing files by hand. Keeping exactly one unremovable account means
+        there is always a way in.
+      </p>
+      <p>
+        The name <code>superadmin</code> and the old <code>admin</code> name are
+        both <b>reserved</b>, so nobody can register them and be mistaken for the
+        real thing. Its password is the documented default until you replace it,
+        which is worth doing early — it is the one account you cannot revoke by
+        removing it.
+      </p>
+    </div>
+  </details>
+
+  <div class="note warn" style="margin-top:18px">
+    <p>
+      <b>Passwords are stored as plain text.</b> Anyone who can read the accounts
+      file can sign in as anyone, which is exactly why the check above has to be
+      re-done every time rather than trusted once at sign-in. Keep the folder
+      private, and don't reuse a password you use elsewhere — see
+      <a href="operations.html#backup">what to back up</a>.
+    </p>
+  </div>
+</section>
+
+<section id="signup">
+  <h2>Creating an account</h2>
+  <p class="lede">
+    Two different routes in, because the two roles need proving in two different
+    ways. A person only ever goes through one of them.
+  </p>
+
+  <details style="--lc:var(--l2);--lcs:var(--l2-soft)" open>
+    <summary>A user confirms their own email with a code <span class="tag">no approval</span></summary>
+    <div class="body">
+      <p>
+        Every account needs an email address — a user included. When someone signs
+        up as a <b>user</b>, a six-digit code is emailed to the address they gave
+        and they type it in.
+      </p>
+      <p>
+        <b>That is the entire approval process.</b> No administrator is asked,
+        and none is waiting. Until the code comes back the account exists but
+        <b>cannot sign in</b> — which is the point. Without this, anyone could
+        register using an address they do not own.
+      </p>
+      <p>
+        The code stops working after <b>ten minutes</b>, and <b>five wrong
+        guesses</b> void it so nobody can simply keep guessing. There is a
+        one-minute wait between sending codes, and a cap of five an hour, so the
+        address cannot be flooded.
+      </p>
+      <p>
+        If the code does not arrive, the screen says so plainly and offers to
+        send another — it never pretends a message went out when it did not.
+      </p>
+    </div>
+  </details>
+
+  <details style="--lc:var(--l3);--lcs:var(--l3-soft)">
+    <summary>An admin request waits for a person <span class="tag">approval</span></summary>
+    <div class="body">
+      <p>
+        An admin request is <b>not</b> confirmed by code. Its address is already
+        required — it is how the decision reaches the applicant — but a code
+        would prove nothing extra, because the real question is whether this
+        person should be allowed to administer the app at all. That is a human
+        judgement, so it goes to the ACCOUNTS card and waits there as
+        <b>PENDING</b>.
+      </p>
+      <p>
+        Being unable to receive the code does not help someone get admin access,
+        so asking for one would be security theatre.
+      </p>
+    </div>
+  </details>
+
+  <div class="note">
+    <p>
+      <b>Unverified is not the same as pending.</b> In the accounts list an
+      <b>UNVERIFIED</b> row means <i>nobody is holding this up</i> — the person
+      just has not typed their code yet. A <b>PENDING</b> row means a human has
+      to act. So unverified rows are not counted as things waiting for you, and
+      they have no Approve button: approving one would hand out a working account
+      for an address nobody proved they own. They can still be deleted, so an
+      abandoned sign-up does not sit there holding a username forever.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <nav class="pager" aria-label="Next and previous page">
+    <a href="upload.html">
+      <span class="dir">Previous</span>
+      <span class="to">Walkthrough — follow one upload</span>
+    </a>
+    <a href="operations.html">
+      <span class="dir">Next</span>
+      <span class="to">Running it — services and backups</span>
+    </a>
+  </nav>
+  <p style="margin-top:26px">
+    This guide describes how the app behaves, not how it is written. It is
+    documentation only: it is never served by the app, and nothing in the app
+    reads it. If the app's behaviour changes, these pages need updating with it.
+  </p>
+</footer>
+
+</div>
+
+<button type="button" class="btn" id="topBtn" title="Back to top" aria-label="Back to top">&uarr;</button>
+
+<script src="app.js"></script>
+</body>
+</html>

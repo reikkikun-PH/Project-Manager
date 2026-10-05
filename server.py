@@ -18,6 +18,7 @@ import socket
 import atexit
 import shlex
 import secrets
+import hashlib
 import shutil
 import signal
 import platform
@@ -133,6 +134,7 @@ NOTIFY_PATH = os.path.join(DATA_DIR, "notify.json")
 # host.py writes the pinned quick-tunnel link here as soon as it is up.
 SESSION_URL_PATH = os.path.join(DATA_DIR, "tunnel-url.txt")
 RESEND_URL = "https://api.resend.com/emails"
+BREVO_URL = "https://api.brevo.com/v3"
 _notify_state = {"ok": None, "err": ""}
 
 
@@ -156,6 +158,10 @@ _url_probe = {"url": "", "strikes": 0}
 _url_probe_started = False
 _url_probe_lock = threading.Lock()
 _URL_PROBE_TTL = 10  # seconds between liveness probes (own tunnel, cheap)
+# How long a notifier may wait for the first probe verdict before falling back
+# to the localhost link. One 8s probe round trip is the worst case, so this
+# only ever delays mail to a not-yet-known-good link - never blocks forever.
+_URL_PROBE_WAIT = 9
 
 
 def _tunnel_answers(url):
@@ -177,36 +183,65 @@ def _tunnel_answers(url):
         return False
 
 
+def _url_probe_once():
+    """Run a single liveness check and update the cached verdict.
+
+    Shared by the background loop and the synchronous first probe below so
+    both apply identical rules."""
+    cand = _read_session_file()
+    if not cand:
+        with _url_probe_lock:
+            _url_probe.update({"url": "", "strikes": 0})
+        return
+    alive = _tunnel_answers(cand)
+    with _url_probe_lock:
+        if alive:
+            _url_probe.update({"url": cand, "strikes": 0})
+        else:
+            # One miss can be a blip; two in a row means dead.
+            _url_probe["strikes"] += 1
+            if _url_probe["strikes"] >= 2:
+                _url_probe["url"] = ""
+
+
 def _url_probe_loop():
     while True:
         try:
-            cand = _read_session_file()
-            if not cand:
-                with _url_probe_lock:
-                    _url_probe.update({"url": "", "strikes": 0})
-            else:
-                alive = _tunnel_answers(cand)
-                with _url_probe_lock:
-                    if alive:
-                        _url_probe.update({"url": cand, "strikes": 0})
-                    else:
-                        # One miss can be a blip; two in a row means dead.
-                        _url_probe["strikes"] += 1
-                        if _url_probe["strikes"] >= 2:
-                            _url_probe["url"] = ""
+            _url_probe_once()
         except Exception:
             pass
         time.sleep(_URL_PROBE_TTL)
 
 
-def public_base_url():
+def public_base_url(wait=0):
     """This session's live public link, or '' when no tunnel is answering.
 
     Kept fresh by a background probe so a dead tunnel stops being advertised
-    even if host.py never got to clean up."""
+    even if host.py never got to clean up.
+
+    `wait` forces the first probe to run inline (bounded) before answering.
+    The background thread needs up to one network round trip to reach its
+    first verdict, so without this the very first caller after startup gets
+    '' and falls back to advertising localhost - which is exactly what an
+    approval e-mail must not do.
+    """
     global _url_probe_started
     if not _url_probe_started:
         _url_probe_started = True
+        if wait:
+            # Synchronous first probe. Done BEFORE the loop starts so the two
+            # cannot interleave and double-count a strike.
+            deadline = time.monotonic() + wait
+            while True:
+                try:
+                    _url_probe_once()
+                except Exception:
+                    pass
+                with _url_probe_lock:
+                    done = bool(_url_probe["url"]) or not _read_session_file()
+                if done or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.25)
         threading.Thread(target=_url_probe_loop, daemon=True).start()
     with _url_probe_lock:
         return _url_probe["url"]
@@ -233,26 +268,180 @@ def notify_config():
     key = os.environ.get("RESEND_API_KEY", "").strip()
     if key:
         cfg["resendApiKey"] = key
+    br_key = os.environ.get("BREVO_API_KEY", "").strip()
+    if br_key:
+        cfg["brevoApiKey"] = br_key
     to = os.environ.get("NOTIFY_TO", "").strip()
     if to:
         cfg["to"] = to
     return cfg
 
 
-def _send_resend(cfg, subject, body):
-    """POST one email through Resend. Returns (ok, detail). Never raises."""
+def notify_provider(cfg):
+    """Which mail service to use: 'brevo', 'resend', or '' when neither.
+
+    Brevo wins when configured. The `provider` key can force a choice, which
+    is how you keep both sets of credentials in the file and switch by editing
+    one line rather than deleting a key."""
+    have_bv = bool(str(cfg.get("brevoApiKey") or "").strip())
+    have_rs = bool(str(cfg.get("resendApiKey") or "").strip())
+    forced = str(cfg.get("provider") or "").strip().lower()
+    if forced == "brevo":
+        return "brevo" if have_bv else ""
+    if forced == "resend":
+        return "resend" if have_rs else ""
+    if have_bv:
+        return "brevo"
+    return "resend" if have_rs else ""
+
+
+def _form_encode(fields):
+    """application/x-www-form-urlencoded body. Kept for SMTP-relay style
+    providers; the Brevo and Resend paths below post JSON."""
+    from urllib.parse import urlencode
+    return urlencode(fields, encoding="utf-8").encode("utf-8")
+
+
+def _send_brevo(cfg, subject, body, html=None, to=None):
+    """POST one email through Brevo (formerly Sendinblue). Returns (ok, detail).
+
+    Brevo differs from Resend in the two ways that matter here:
+      * JSON body, not a form post.
+      * `from` is an OBJECT {name, email}, and the email must be one of the
+        account's registered senders - Brevo rejects an unknown one outright
+        with a 400. That sender list is what _brevo_diagnostics() reports, so
+        a newly added sender with no domain is visible before it matters.
+
+    A verified gmail.com sender works for any recipient on the free plan
+    (300/day), which is why no domain is required.
+    """
+    import base64
+    key = str(cfg.get("brevoApiKey") or "").strip()
+    to = str(to or cfg.get("to") or "").strip()
+    if not key or not to:
+        return False, "no brevo api key or recipient configured"
+    # `from` may be a bare address or "Name <addr>"; Brevo wants them split.
+    raw = str(cfg.get("from") or cfg.get("brevoFrom") or "").strip()
+    name, addr = _split_sender(raw, cfg)
+    if not addr:
+        return False, "no from address configured"
+    payload = {
+        "sender": {"name": name, "email": addr},
+        "to": [{"email": a.strip()} for a in to.split(",") if a.strip()],
+        "subject": subject,
+        "textContent": body,
+    }
+    if html:
+        payload["htmlContent"] = html
+    # Brevo authenticates with an `api-key` header. It also accepts HTTP Basic
+    # per its docs, but the live API rejects Basic with 401 "token is invalid
+    # or expired" while accepting this header - verified against the account.
+    req = urllib.request.Request(
+        f"{BREVO_URL}/smtp/email", data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"api-key": key,
+                 "Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "User-Agent": "ServerProjectManager/1.0 (stdlib urllib)"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            detail = r.read().decode("utf-8", "replace")[:200]
+            # 201 Created carries the queued messageId in the body.
+            return 200 <= r.status < 300, f"HTTP {r.status} {detail}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code} {e.read().decode('utf-8', 'replace')[:300]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _split_sender(raw, cfg=None):
+    """'Project Manager <a@b.c>' -> ('Project Manager', 'a@b.c').
+
+    Falls back to brevoSenderName/brevoSenderEmail, then to a `from` that is
+    a bare address. Never raises: a malformed value yields ('', '') and the
+    caller reports a clear config error instead of sending garbage."""
+    text = str(raw or "").strip()
+    if "<" in text and ">" in text:
+        name = text.split("<", 1)[0].strip().strip('"').strip()
+        addr = text.split("<", 1)[1].split(">", 1)[0].strip()
+        if addr:
+            return name or addr.split("@", 1)[0], addr
+    if text and "@" in text:
+        return text.split("@", 1)[0], text
+    addr = ""
+    if cfg:
+        addr = str(cfg.get("brevoSenderEmail") or "").strip()
+        if addr:
+            return str(cfg.get("brevoSenderName") or addr.split("@", 1)[0]).strip(), addr
+    return "", ""
+
+
+def _brevo_diagnostics(cfg):
+    """(sender_ok, note) describing whether Brevo can actually send.
+
+    Reads the account's registered senders. An inactive sender means Brevo
+    accepted a pending address but the 6-digit confirmation was never entered
+    - a silent failure that otherwise shows up only as a rejected send."""
+    key = str(cfg.get("brevoApiKey") or "").strip()
+    if not key:
+        return False, "no Brevo api key configured"
+    req = urllib.request.Request(
+        f"{BREVO_URL}/senders",
+        headers={"api-key": key, "Accept": "application/json",
+                 "User-Agent": "ServerProjectManager/1.0 (stdlib urllib)"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return False, f"could not read Brevo senders (HTTP {e.code})"
+    except Exception as e:
+        return False, f"could not reach Brevo ({str(e)[:80]})"
+    senders = [s for s in (data.get("senders") or []) if isinstance(s, dict)]
+    active = [s for s in senders if s.get("active")]
+    _n, want_addr = _split_sender(cfg.get("from"), cfg)
+    if not active:
+        return False, ("Brevo has no active sender - verify one "
+                       "(Settings > Senders & Domains)")
+    if want_addr and not any(
+            str(s.get("email", "")).lower() == want_addr.lower() for s in active):
+        return False, (f"from {want_addr} is not a verified Brevo sender "
+                       f"(active: {', '.join(s.get('email', '?') for s in active)})")
+    # gmail/yahoo senders carry no DKIM, so say so before someone wonders
+    # why approval mails land in spam.
+    domain = want_addr.rsplit("@", 1)[-1].lower() if want_addr else ""
+    if domain in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com"):
+        return True, (f"Brevo sender {want_addr} is active. It is a free "
+                      f"mail provider, so these carry no DKIM/SPF - expect "
+                      f"some to land in spam.")
+    return True, f"Brevo sender {want_addr or active[0].get('email')} is active."
+
+
+def _send_resend(cfg, subject, body, html=None, to=None):
+    """POST one email through Resend. Returns (ok, detail). Never raises.
+
+    `html` is optional; when present it is sent alongside the plain-text
+    `body` so mail clients that render HTML show the laid-out version and
+    the rest still get a readable plain-text fallback.
+
+    `to` overrides the configured recipient so a decision can be mailed to
+    the person it is about, not just to the approver. Falls back to the
+    configured `to` when omitted or empty.
+    """
     key = str(cfg.get("resendApiKey") or "").strip()
-    to = str(cfg.get("to") or "").strip()
+    to = str(to or cfg.get("to") or "").strip()
     sender = str(cfg.get("from")
                  or "Project Manager <onboarding@resend.dev>").strip()
     if not key or not to:
         return False, "no api key or recipient configured"
-    payload = json.dumps({
+    mail = {
         "from": sender,
         "to": [a.strip() for a in to.split(",") if a.strip()],
         "subject": subject,
         "text": body,
-    }).encode("utf-8")
+    }
+    if html:
+        mail["html"] = html
+    payload = json.dumps(mail).encode("utf-8")
     req = urllib.request.Request(
         RESEND_URL, data=payload, method="POST",
         headers={"Authorization": f"Bearer {key}",
@@ -292,65 +481,473 @@ def _notify_log(line):
         pass
 
 
-def notify(subject, body):
-    """Email the approver in the background. Fire-and-forget by design.
+# --- e-mail layout ----------------------------------------------------------
+# Built as one table-based, inline-styled document: Gmail, Outlook and Apple
+# Mail all strip <style> blocks or flex/grid, so every rule is an attribute.
+# Light palette (not the dashboard's dark) because mail clients force their
+# own background behind a dark table and the text ends up unreadable.
+_INK = "#1d1f24"
+_MUTED = "#6b6f7b"
+_LINE = "#e4e1da"
+_PAPER = "#f6f4f0"
+_CARD = "#ffffff"
+_ACCENT = "#ff4b1f"
+
+
+def _esc(value):
+    """HTML-escape anything that came from a user (names, ids, notes)."""
+    return (str(value).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _mail_url(url):
+    """Only http(s) links become clickable hrefs, so a crafted value can't
+    smuggle a javascript: URI into the mail."""
+    text = str(url or "")
+    return text if text.lower().startswith(("http://", "https://")) else ""
+
+
+def _mail_rows(rows):
+    """Label/value pairs as a two-column table. Long values wrap instead of
+    being cut off, which is what made the old 'Project: ...' line unreadable."""
+    out = []
+    for label, value in rows:
+        if value in (None, ""):
+            continue
+        out.append(
+            '<tr>'
+            '<td style="padding:10px 16px;border-bottom:1px solid ' + _LINE + ';'
+            'font:600 11px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+            'letter-spacing:.08em;text-transform:uppercase;color:' + _MUTED + ';'
+            'white-space:nowrap;vertical-align:top;width:34%">' + _esc(label) + '</td>'
+            '<td style="padding:10px 16px;border-bottom:1px solid ' + _LINE + ';'
+            'font:600 15px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+            'color:' + _INK + ';overflow-wrap:break-word;word-break:break-word;">'
+            + _esc(value) + '</td>'
+            '</tr>')
+    if not out:
+        return ""
+    return ('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="border-collapse:collapse;margin:0 0 24px;">'
+            + "".join(out) + '</table>')
+
+
+def _mail_button(label, url):
+    """Table-based button - the only bulletproof way to get a tappable block
+    in Outlook, which ignores padding on <a> and border-radius on <table>."""
+    url = _mail_url(url)
+    if not label or not url:
+        return ""
+    return (
+        '<table role="presentation" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:separate;margin:0 0 24px;">'
+        '<tr><td align="center" bgcolor="' + _ACCENT + '" '
+        'style="border-radius:8px;">'
+        '<a href="' + _esc(url) + '" target="_blank" rel="noopener" '
+        'style="display:inline-block;padding:14px 28px;font:700 14px/1 '
+        '-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
+        'letter-spacing:.04em;color:#ffffff;text-decoration:none;">'
+        + _esc(label) + '</a>'
+        '</td></tr></table>')
+
+
+def _mail_html(eyebrow, heading, intro, rows=(), cta=(), note=None, footer=()):
+    """One responsive e-mail. `cta` is (label, url); `footer` is plain lines."""
+    parts = [
+        '<!doctype html><html><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width,initial-scale=1">',
+        '<meta name="color-scheme" content="light dark">',
+        '<meta name="supported-color-schemes" content="light">',
+        '<title>' + _esc(heading) + '</title></head>',
+        '<body style="margin:0;padding:0;background:' + _PAPER + ';">',
+        # Pre-header: shown in the inbox list, hidden in the opened message.
+        '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">'
+        + _esc(note or intro) + '</div>',
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;background:' + _PAPER + ';">',
+        '<tr><td align="center" style="padding:28px 14px;">',
+        # role=presentation + align=center centres the 560px shell in Outlook.
+        '<table role="presentation" width="560" cellpadding="0" cellspacing="0" '
+        'style="width:100%;max-width:560px;border-collapse:collapse;'
+        'background:' + _CARD + ';border:1px solid ' + _LINE + ';'
+        'border-radius:14px;overflow:hidden;">',
+
+        # Accent bar echoing the card's top border in the dashboard.
+        '<tr><td height="4" style="height:4px;line-height:0;font-size:0;'
+        'background:linear-gradient(90deg,' + _ACCENT + ',#ffb59b);">&nbsp;</td></tr>',
+
+        '<tr><td style="padding:28px 28px 0;">',
+        '<div style="font:700 11px/1 -apple-system,Segoe UI,Roboto,Helvetica,Arial,'
+        'sans-serif;letter-spacing:.14em;text-transform:uppercase;color:'
+        + _ACCENT + ';margin:0 0 10px;">' + _esc(eyebrow) + '</div>',
+        '<h1 style="margin:0 0 12px;font:700 24px/1.25 -apple-system,Segoe UI,'
+        'Roboto,Helvetica,Arial,sans-serif;letter-spacing:-.01em;color:'
+        + _INK + ';overflow-wrap:break-word;word-break:break-word;">'
+        + _esc(heading) + '</h1>',
+        '<p style="margin:0 0 22px;font:400 15px/1.6 -apple-system,Segoe UI,'
+        'Roboto,Helvetica,Arial,sans-serif;color:' + _MUTED + ';">'
+        + _esc(intro) + '</p>',
+        '</td></tr>',
+
+        '<tr><td style="padding:0 28px;">',
+        _mail_rows(rows),
+        _mail_button(*cta) if cta else "",
+        ('<p style="margin:0 0 24px;padding:14px 16px;background:' + _PAPER + ';'
+         'border-left:3px solid ' + _LINE + ';border-radius:0 8px 8px 0;'
+         'font:400 14px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,'
+         'sans-serif;color:' + _MUTED + ';">' + _esc(note) + '</p>')
+        if note else "",
+        '</td></tr>',
+
+        # Footer: separated by a rule so the metadata never reads as body copy.
+        '<tr><td style="padding:4px 28px 28px;">',
+        '<div style="border-top:1px solid ' + _LINE + ';padding-top:18px;">',
+    ]
+    for line in footer:
+        parts.append('<div style="font:400 12px/1.7 -apple-system,Segoe UI,Roboto,'
+                     'Helvetica,Arial,sans-serif;color:' + _MUTED + ';'
+                     'overflow-wrap:break-word;word-break:break-word;">'
+                     + _esc(line) + '</div>')
+    parts += [
+        '</div></td></tr>',
+        '</table>',
+        '</td></tr></table>',
+        '</body></html>',
+    ]
+    return "".join(parts)
+
+
+def _mail_text(heading, intro, rows=(), cta=(), note=None, footer=()):
+    """Plain-text twin of _mail_html - the fallback for clients that refuse
+    to render HTML, and the only version a terminal user ever sees."""
+    out = [heading, "", intro, ""]
+    label_width = max((len(str(label)) for label, _ in rows), default=0)
+    for label, value in rows:
+        if value in (None, ""):
+            continue
+        out.append(f"{str(label).ljust(label_width)}  {value}")
+    if rows:
+        out.append("")
+    if cta and cta[0] and cta[1]:
+        out += [f"{cta[0]}: {cta[1]}", ""]
+    if note:
+        out += [note, ""]
+    if footer:
+        out += ["-" * 32]
+        out += list(footer)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _notify_footer():
+    """The metadata block appended to every notification, so an approver can
+    tell which instance asked and when.
+
+    Calls public_base_url(wait=...) so the link is verified before it is
+    printed. A mail that advertises a dead or localhost URL is worse than one
+    that takes a couple of seconds longer to go out."""
+    link = public_base_url(wait=_URL_PROBE_WAIT)
+    return [
+        f"Dashboard:  {link + '/' if link else f'http://127.0.0.1:{PORT}/'}",
+        f"Instance:   {INSTANCE} (slot {SLOT})",
+        f"Sent:       {time.strftime('%Y-%m-%d %H:%M')}",
+    ]
+
+
+def _send_email(cfg, subject, body, html=None, to=None):
+    """Send via whichever provider notify.json configures. Never raises.
+
+    Single seam for both services so callers - and the verified-send reporting
+    in notify_account_decision - never need to know which one is in use."""
+    provider = notify_provider(cfg)
+    if provider == "brevo":
+        return _send_brevo(cfg, subject, body, html, to)
+    if provider == "resend":
+        return _send_resend(cfg, subject, body, html, to)
+    return False, "no mail provider configured (need brevoApiKey or resendApiKey)"
+
+
+def notify(subject, body, html=None, to=None, wait=False):
+    """Email in the background. Fire-and-forget by design.
 
     Never raises and never blocks the caller, so a slow/broken mail API
     can't delay an upload or leak an error back to the browser.
+
+    `to` sends to a specific address instead of the configured approver -
+    used for approval decisions, which belong to the applicant.
+
+    `wait` sends on the calling thread and returns (ok, detail), for the one
+    case where reporting a false success is worse than a brief delay: telling
+    an admin their decision e-mail went out when the mail API rejected it.
+    Callers that pass wait=True must not be on an upload's critical path.
     """
     cfg = notify_config()
     if cfg.get("enabled") is False:
         _notify_log(f"{time.strftime('%H:%M:%S')} SKIPPED (disabled): {subject}")
-        return
-    key = str(cfg.get("resendApiKey") or "").strip()
-    to = str(cfg.get("to") or "").strip()
-    if not key or not to:
+        return (False, "notifications are disabled") if wait else None
+    if not notify_provider(cfg):
+        _notify_log(f"{time.strftime('%H:%M:%S')} SKIPPED (no provider): {subject}")
+        return (False, "no mail provider configured") if wait else None
+    to = str(to or cfg.get("to") or "").strip()
+    if not to:
         _notify_log(f"{time.strftime('%H:%M:%S')} SKIPPED "
-                    f"(no api key / recipient): {subject}")
-        return
-    stamp = time.strftime("%Y-%m-%d %H:%M")
-    full = (f"{body}\n\nDashboard: {dashboard_link()}\n"
-            f"Instance: {INSTANCE} (slot {SLOT})\nTime: {stamp}\n")
+                    f"(no recipient): {subject}")
+        return (False, "no recipient configured") if wait else None
+    footer = _notify_footer()
+    full = body.rstrip() + "\n\n" + "-" * 32 + "\n" + "\n".join(footer) + "\n"
+
+    if wait:
+        ok, detail = _send_email(cfg, subject, full, html, to)
+        _record_notify(to, subject, ok, detail)
+        return ok, detail
 
     def worker():
-        ok, detail = _send_resend(cfg, subject, full)
-        if ok:
-            log_line("Notify", f"sent to {to}: {subject}")
-            _notify_log(f"{time.strftime('%H:%M:%S')} SENT to {to}: {subject}")
-        else:
-            log_line("Notify", f"FAILED: {subject} - {detail}")
-            _notify_log(f"{time.strftime('%H:%M:%S')} FAILED: {subject} - {detail}")
+        ok, detail = _send_email(cfg, subject, full, html, to)
+        _record_notify(to, subject, ok, detail)
 
     threading.Thread(target=worker, daemon=True).start()
 
 
-def notify_account_created(username, role, pending_admin):
-    """A signup happened. Admin ones also need approval, so say which."""
-    if pending_admin:
-        notify(f"[{INSTANCE}] Approval needed: admin account '{username}'",
-               f"A signup requested ADMIN access.\n\n"
-               f"Username: {username}\n\n"
-               f"Approve or reject it in the ACCOUNTS card of the dashboard.")
+def _record_notify(to, subject, ok, detail):
+    """Log one send attempt. Shared by the background and synchronous paths."""
+    if ok:
+        log_line("Notify", f"sent to {to}: {subject}")
+        _notify_log(f"{time.strftime('%H:%M:%S')} SENT to {to}: {subject}")
     else:
-        notify(f"[{INSTANCE}] New account created: '{username}'",
-               f"A new USER account signed up and is active immediately.\n\n"
-               f"Username: {username}\n"
-               f"Role:     user (no approval needed)\n\n"
-               f"Review it in the ACCOUNTS card of the dashboard and remove it "
-               f"if you don't recognise the name.")
+        log_line("Notify", f"FAILED: {subject} - {detail}")
+        _notify_log(f"{time.strftime('%H:%M:%S')} FAILED: {subject} - {detail}")
+
+
+def notify_account_created(username, role, pending_admin, email=""):
+    """A signup happened. Admin ones also need approval, so say which.
+
+    Goes to the approver, never to the applicant - they already know they
+    signed up. The applicant's own address is used when they are told the
+    outcome (see notify_account_decision).
+    """
+    email = clean_email(email)
+    if pending_admin:
+        heading = f"Admin account '{username}' needs your approval"
+        intro = (f"Someone signed up requesting ADMIN access to "
+                 f"{INSTANCE}. Until you approve it they cannot change anything.")
+        rows = [("Username", username),
+                ("Email", email or "(none given)"),
+                ("Requested role", "admin"),
+                ("Status", "Waiting for approval")]
+        cta = ("Review in Accounts", dashboard_link())
+        note = ("Open the ACCOUNTS card on the dashboard, then approve or "
+                "reject. They will be emailed the decision automatically.")
+        subject = f"[{INSTANCE}] Approval needed: admin account '{username}'"
+    else:
+        heading = f"New account: {username}"
+        intro = (f"A new USER account signed up on {INSTANCE}. It is already "
+                 f"active - no approval needed.")
+        rows = [("Username", username),
+                ("Email", email or "(none given)"),
+                ("Role", role or "user"),
+                ("Status", "Active")]
+        cta = ("Review in Accounts", dashboard_link())
+        note = ("Open the ACCOUNTS card on the dashboard. Remove the account if "
+                "you don't recognise the name.")
+        subject = f"[{INSTANCE}] New account created: '{username}'"
+    notify(subject,
+           _mail_text(heading, intro, rows, cta, note),
+           _mail_html("Account approval" if pending_admin else "New account",
+                      heading, intro, rows, cta, note, _notify_footer()))
+
+
+def notify_account_received(username, email, role="admin"):
+    """Acknowledge the applicant's own signup, sent to THEIR address.
+
+    The counterpart to notify_account_decision: this says "we got it, wait",
+    that one says "here is the answer". Without it an applicant has no
+    confirmation their request even arrived, and no way to notice it was
+    silently dropped.
+
+    Admin requests are the case that matters - they are the ones left waiting
+    on someone else. A plain user account is live immediately, so their mail
+    is a welcome rather than an acknowledgement, and is only sent when they
+    gave an address to send it to.
+
+    Returns (sent, reason) reflecting what the API accepted. Runs
+    synchronously so the signup response can honestly say whether it went out
+    - see notify_account_decision for why.
+    """
+    email = clean_email(email)
+    if not email:
+        return False, "no email address given"
+    if not valid_email(email):
+        return False, f"'{email}' is not a valid address"
+
+    if role == ROLE_ADMIN:
+        heading = "We received your admin request"
+        intro = (f"Thanks for requesting admin access to {INSTANCE}. Your "
+                 f"request is in the queue and an administrator has to approve "
+                 f"it before you can sign in.")
+        rows = [("Username", username), ("Instance", INSTANCE),
+                ("Role requested", "Admin"),
+                ("Status", "Waiting for approval"),
+                ("Sent to", email)]
+        note = ("You will get a second e-mail at this address as soon as it "
+                "is approved or declined. Nothing else is needed from you - and "
+                "if you hear nothing, check your spam folder before signing up "
+                "again.")
+        eyebrow, cta = "Request received", ()
+        subject = f"[{INSTANCE}] Admin request received: {username}"
+    else:
+        heading = f"Your {INSTANCE} account is ready"
+        intro = (f"Your account was created and is active now - no approval "
+                 f"needed. You can sign in straight away.")
+        rows = [("Username", username), ("Instance", INSTANCE),
+                ("Role", "User"), ("Status", "Active"), ("Sent to", email)]
+        note = ("Sign in with the username and password you just chose. If you "
+                "were not expecting this account, reply to this e-mail.")
+        eyebrow, cta = "Account created", ("Open the dashboard", dashboard_link())
+        subject = f"[{INSTANCE}] Account created: {username}"
+
+    ok, detail = notify(subject,
+                        _mail_text(heading, intro, rows, cta, note),
+                        _mail_html(eyebrow, heading, intro, rows, cta, note,
+                                   _notify_footer()),
+                        to=email, wait=True)
+    if ok:
+        return True, f"sent to {email}"
+    return False, _notify_failure_reason(detail, email)
+
+
+def notify_account_code(username, email, code):
+    """Mail the verification code to the address the applicant just gave.
+
+    This is the only thing standing between "anyone can sign up" and "the
+    account belongs to whoever actually controls that mailbox", so it says
+    plainly what the code is for and how long it lasts.
+
+    Returns (sent, reason) and runs synchronously, for the same reason the
+    approval path does: telling someone "we emailed you a code" when nothing
+    was sent leaves them stuck with no way to tell that from their own spam
+    folder. See notify_account_decision."""
+    email = clean_email(email)
+    if not email:
+        return False, "no email address on the account"
+    if not valid_email(email):
+        return False, f"'{email}' is not a valid address"
+
+    heading = "Your verification code"
+    intro = (f"Confirm this code to finish setting up your {INSTANCE} account. "
+             f"It proves you can read mail at {email}, so nobody else can sign "
+             f"up as you.")
+    rows = [("Code", code), ("Username", username), ("Instance", INSTANCE),
+            ("Valid for", f"{OTP_TTL // 60} minutes")]
+    note = ("If you did not ask for this account, ignore this message - the "
+            "account cannot be used until this code is entered, and nobody "
+            "else can use it either. Do not forward or share the code.")
+    ok, detail = notify(
+        f"[{INSTANCE}] Your verification code: {code}",
+        _mail_text(heading, intro, rows, (), note),
+        _mail_html("Confirm your email", heading, intro, rows, (), note,
+                   _notify_footer()),
+        to=email, wait=True)
+    if ok:
+        return True, f"sent to {email}"
+    return False, _notify_failure_reason(detail, email)
+
+
+def notify_account_decision(username, email, role, approved, decided_by=""):
+    """Tell the applicant their admin request was approved or declined.
+
+    Sent to the address they registered with. Returns (sent, reason): `sent`
+    reflects what the mail API actually accepted, NOT merely that we tried.
+    This runs synchronously (notify(..., wait=True)) because the alternative
+    is telling an admin "decision e-mail sent" for a message the API
+    rejected - a false success that leaves the applicant uninformed.
+    """
+    email = clean_email(email)
+    if not email:
+        return False, "no email address is on the account"
+    if not valid_email(email):
+        return False, f"'{email}' is not a valid address"
+
+    if approved:
+        heading = f"Your admin access to {INSTANCE} is approved"
+        intro = (f"{decided_by or 'An administrator'} approved your admin "
+                 f"request. You can sign in now with your usual username and "
+                 f"password.")
+        rows = [("Username", username), ("Role", "admin"),
+                ("Status", "Approved"),
+                ("Decided by", decided_by or "-")]
+        note = ("Sign in and you will have full admin access: approving other "
+                "accounts, running projects and changing settings.")
+    else:
+        heading = f"Your admin request for {INSTANCE} was declined"
+        intro = (f"{decided_by or 'An administrator'} declined your request "
+                 f"for admin access. Your account was not created.")
+        rows = [("Username", username), ("Role requested", "admin"),
+                ("Status", "Declined"),
+                ("Decided by", decided_by or "-")]
+        note = ("If you think this was a mistake, ask the person who declined "
+                "it to approve your request again.")
+
+    footer = _notify_footer()
+    subject = (f"[{INSTANCE}] Admin request approved: {username}" if approved
+               else f"[{INSTANCE}] Admin request declined: {username}")
+    ok, detail = notify(subject,
+                        _mail_text(heading, intro, rows, ("Sign in", dashboard_link()),
+                                   note),
+                        _mail_html("Admin approved" if approved else "Admin declined",
+                                   heading, intro, rows,
+                                   ("Sign in now", dashboard_link()) if approved else (),
+                                   note, footer),
+                        to=email, wait=True)
+    if ok:
+        return True, f"notified {email}"
+    # Turn the API's complaint into something the approver can act on.
+    return False, _notify_failure_reason(detail, email)
+
+
+def _notify_failure_reason(detail, to):
+    """Short, actionable explanation of why a send was rejected."""
+    text = str(detail or "")
+    low = text.lower()
+    if "disabled" in low:
+        return "notifications are turned off in notify.json"
+    # Brevo: the from address is not a registered sender on this account.
+    if "unauthorized" in low and "sender" in low:
+        return ("the `from` address is not a verified Brevo sender - add and "
+                "confirm it under Settings > Senders & Domains")
+    if "sender" in low and ("invalid" in low or "not found" in low
+                            or "doesn't exist" in low):
+        return ("Brevo rejected the `from` address - it must be a verified "
+                "sender registered on this account")
+    if "unauthorized" in low or "401" in text or "invalid api key" in low:
+        return ("the mail API rejected the credentials - check the API key in "
+                "notify.json")
+    # Resend: sandbox domain may only send to the account's own address.
+    if "403" in text or "only send testing emails" in low:
+        return ("the mail service only allows sending to its own account "
+                "address - set a verified domain as `from` in notify.json")
+    if "429" in text or "rate" in low or "quota" in low or "too many" in low:
+        return "the mail service is rate limiting - try again shortly"
+    if "400" in text and ("recipient" in low or "email" in low):
+        return f"Brevo rejected the recipient address ({str(to)[:60]})"
+    return f"the mail service rejected it ({text[:120]})"
 
 
 def notify_project_request(name, pid, owner, ptype):
     """A user's project upload is waiting for approval."""
+    base = public_base_url() or f"http://127.0.0.1:{PORT}"
+    live = f"{base}/p/{pid}/"
+    heading = f"Project '{name}' needs your approval"
+    intro = (f"{owner} uploaded a project to {INSTANCE}. It is not public yet "
+             f"until you approve it.")
+    rows = [("Project", name), ("Owner", owner),
+            ("Type", "Website" if ptype == "static" else "App"),
+            ("Project ID", pid), ("Status", "Waiting for approval"),
+            ("Live once approved", live)]
+    cta = ("Approve in dashboard", dashboard_link())
+    note = "Open the project's card on the dashboard, then approve or reject."
     notify(f"[{INSTANCE}] Approval needed: project '{name}'",
-           f"A project upload is waiting for approval.\n\n"
-           f"Project: {name}\n"
-           f"Id:      {pid}\n"
-           f"Type:    {ptype}\n"
-           f"Owner:   {owner}\n\n"
-           f"Approve or reject it on the project's card in the dashboard.\n"
-           f"Once approved it will be live at: "
-           f"{(public_base_url() or f'http://127.0.0.1:{PORT}')}/p/{pid}/")
+           _mail_text(heading, intro, rows, cta, note),
+           _mail_html("Project approval", heading, intro, rows, cta, note,
+                      _notify_footer()))
 
 
 def _query(path):
@@ -460,11 +1057,20 @@ def project_creds(proj):
 # --- Admin auth (public read-only dashboard, admin manages) ---
 # CREDS_PATH is defined with the other per-instance paths at the top.
 
-# School-demo default: fresh clones have no credentials.json yet, so they
-# sign in as admin / admin123. Creating credentials.json replaces this
-# entirely (it is gitignored and never uploaded).
-DEFAULT_ADMIN = {"username": "admin", "password": "admin123", "role": "admin"}
+# The built-in owner account. It doubles as the fallback when no
+# credentials.json exists, and it is the one account that can never be removed
+# from the accounts list - see is_super_admin(). An admin who deletes it locks
+# every future admin out of the panel with nothing left to restore it with.
+SUPER_ADMIN_USERNAME = "superadmin"
+LEGACY_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN = {"username": SUPER_ADMIN_USERNAME, "password": "admin123",
+                 "role": ROLE_ADMIN, "super": True}
 _DEFAULT_WARNED = False
+
+# Signup can never claim either built-in name. `superadmin` is the owner
+# account; `admin` is the name it used to have, and letting anyone register it
+# would mean the migration below promotes a stranger to super admin.
+RESERVED_USERNAMES = {SUPER_ADMIN_USERNAME, LEGACY_ADMIN_USERNAME}
 
 # Account roles + lifecycle. "user" accounts activate instantly on signup;
 # "admin" signups stay "pending" until an active admin approves them.
@@ -472,8 +1078,32 @@ ROLE_USER = "user"
 VALID_ROLES = (ROLE_USER, ROLE_ADMIN)
 STATUS_ACTIVE = "active"
 STATUS_PENDING = "pending"
+# A third state, distinct from PENDING on purpose. PENDING means "waiting for a
+# human administrator"; UNVERIFIED means "nobody has to act, the applicant just
+# has to prove the address is theirs". Mixing them would tell a new user to sit
+# and wait for approval they will never be granted.
+STATUS_UNVERIFIED = "unverified"
 MAX_ACCOUNTS = 50  # signup spam cap (school demo guardrail)
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+# Deliberately loose: one @, no spaces, a dotted domain. Anything stricter
+# rejects valid addresses, and this is never used to deliver mail blindly -
+# the mail API is the real authority on whether an address is deliverable.
+EMAIL_RE = re.compile(r"^[^\s@,;:<>()\[\]\\\"]{1,64}@[A-Za-z0-9]"
+                      r"(?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                      r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$")
+
+
+def clean_email(value):
+    """Normalise a submitted address to lower case, or '' when absent.
+
+    Lower-cased so one person can't register two accounts that differ only
+    by case. Returns '' rather than None to match the other readers."""
+    return str(value or "").strip().lower()[:254]
+
+
+def valid_email(value):
+    """True when `value` is a plausibly deliverable address."""
+    return bool(EMAIL_RE.match(str(value or "").strip()))
 
 
 def _read_credentials_file():
@@ -490,15 +1120,53 @@ def _read_credentials_file():
     return None
 
 
+def is_super_admin(acc):
+    """True for the one built-in owner account.
+
+    Read from the stored flag rather than from the username, so renaming an
+    account cannot silently hand the protection to somebody else, and so an
+    unrelated account that happens to share the name gains nothing.
+    """
+    return isinstance(acc, dict) and acc.get("super") is True
+
+
+def _ensure_super_admin(accounts):
+    """Flag the owner account in a credentials.json written before it existed.
+
+    Only promotes the legacy `admin` account, and only when nothing is already
+    flagged - so it can never hand the protection to an unrelated admin, and
+    running twice is a no-op. Returns True when it changed something.
+    """
+    if any(is_super_admin(a) for a in accounts):
+        return False
+    for a in accounts:
+        if ((a.get("username") or "") == LEGACY_ADMIN_USERNAME
+                and account_role(a) == ROLE_ADMIN):
+            a["super"] = True
+            return True
+    return False
+
+
 def load_credentials():
-    """All accounts. Falls back to admin/admin123 when unconfigured."""
+    """All accounts. Falls back to superadmin/admin123 when unconfigured."""
     global _DEFAULT_WARNED
     data = _read_credentials_file()
     if data is not None:
+        # Installs created before the super admin existed have a plain `admin`
+        # account that any admin could delete. Promote it once, then record it.
+        if _ensure_super_admin(data):
+            try:
+                save_credentials(data)
+                log_line("Auth", "Promoted the legacy 'admin' account to "
+                                 "super admin; it can no longer be removed.")
+            except Exception as e:
+                # A read-only disk must not stop people signing in; the flag
+                # simply stays in memory until the next successful save.
+                print(f"[Auth] could not record super admin: {e}")
         return data
     if not _DEFAULT_WARNED:
         _DEFAULT_WARNED = True
-        print("[Auth] no credentials.json - using default admin/admin123 "
+        print("[Auth] no credentials.json - using default superadmin/admin123 "
               "(create credentials.json to change it)")
     return [dict(DEFAULT_ADMIN)]
 
@@ -512,9 +1180,26 @@ def save_credentials(accounts):
 
 
 def account_status(acc):
-    """active/pending. Old files without status count as active."""
+    """active / pending / unverified. Old files without status count as active.
+
+    Kept deliberately separate from account_verified: status is the account's
+    place in the signup lifecycle, verified is whether the applicant proved
+    they own the address. They move together, but for different reasons."""
     s = (acc.get("status") or STATUS_ACTIVE).strip().lower()
-    return STATUS_PENDING if s == STATUS_PENDING else STATUS_ACTIVE
+    if s == STATUS_PENDING:
+        return STATUS_PENDING
+    if s == STATUS_UNVERIFIED:
+        return STATUS_UNVERIFIED
+    return STATUS_ACTIVE
+
+
+def account_verified(acc):
+    """Has the applicant proved this address is really theirs?
+
+    A missing key means the account predates email verification, and is trusted
+    - otherwise upgrading would lock every existing install out of its own
+    dashboard. Only an explicit False is unverified."""
+    return isinstance(acc, dict) and acc.get("verified") is not False
 
 
 def account_role(acc):
@@ -534,7 +1219,8 @@ def find_account(username):
 def is_admin_user(username):
     acc = find_account(username) if (username or "").strip() else None
     return (acc is not None and account_role(acc) == ROLE_ADMIN
-            and account_status(acc) == STATUS_ACTIVE)
+            and account_status(acc) == STATUS_ACTIVE
+            and account_verified(acc))
 
 
 def requester_is_admin(body):
@@ -545,11 +1231,125 @@ def requester_is_admin(body):
     acc = find_account(req)
     if acc is None:
         return None, "Unknown account - please sign in again."
+    # Checked before status so an unverified admin is told the truth rather
+    # than being left waiting for an approval queue they are not in.
+    if not account_verified(acc):
+        return None, "Account email is not confirmed."
     if account_status(acc) != STATUS_ACTIVE:
         return None, "Account pending admin approval."
     if account_role(acc) != ROLE_ADMIN:
         return None, "Admin role required."
     return acc, None
+
+
+# --- Email verification codes (OTP) ---
+# A User signs up, gets a code mailed to the address they gave, and enters it.
+# That proves the mailbox is theirs without an administrator getting involved,
+# which is the whole point: a User no longer waits on a human to start using
+# the app, they just have to prove they own the address.
+#
+# The code itself is never stored. Only a salted hash is kept, in memory, so a
+# dump of this process cannot be replayed as a login. Codes do not survive a
+# restart - they last 10 minutes, so a restart costs one "resend" click rather
+# than anything worse.
+OTP_TTL = 600            # seconds a code stays usable
+OTP_RESEND_COOLDOWN = 60  # seconds before another code may be sent
+OTP_MAX_ATTEMPTS = 5      # wrong guesses before the code is burned
+OTP_MAX_PER_HOUR = 5      # codes per account per hour, as a mail-bomb guard
+OTP_MAX_TRACKED = 500     # cap the store, so it cannot grow without bound
+_OTP = {}                 # username -> {"hash", "salt", "exp", "tries", "sent"}
+_OTP_LOCK = threading.Lock()
+
+
+def otp_hash(code, salt):
+    """Hash a submitted code with its salt. Constant-time compare at the end."""
+    return hashlib.sha256((salt + ":" + code).encode("utf-8")).hexdigest()
+
+
+def new_otp_code():
+    """A 6-digit code from the CSPRNG.
+
+    Digits only, so there is no O/0 or 1/l ambiguity to transcribe wrongly -
+    the most common way a legitimate user fails this step."""
+    return "%06d" % secrets.randbelow(1000000)
+
+
+def _otp_prune(now):
+    for name in [n for n, r in _OTP.items() if r.get("exp", 0) < now]:
+        _OTP.pop(name, None)
+
+
+def otp_issue(username):
+    """Mint and remember a code. Returns (code, retry_after_seconds).
+
+    retry_after > 0 means nothing was minted and the caller must wait, which is
+    how the resend cooldown and the hourly cap are enforced."""
+    now = time.time()
+    with _OTP_LOCK:
+        _otp_prune(now)
+        if len(_OTP) > OTP_MAX_TRACKED:
+            # Oldest first, so a burst cannot evict the account being verified.
+            for name in sorted(_OTP, key=lambda n: _OTP[n].get("exp", 0))[:100]:
+                _OTP.pop(name, None)
+        rec = _OTP.get(username)
+        if rec:
+            since_last = now - rec.get("sent", 0)
+            if since_last < OTP_RESEND_COOLDOWN:
+                return None, int(OTP_RESEND_COOLDOWN - since_last) + 1
+            recent = rec.get("recent") or []
+            recent = [t for t in recent if now - t < 3600]
+            if len(recent) >= OTP_MAX_PER_HOUR:
+                return None, int(3600 - (now - recent[0])) + 1
+            rec["recent"] = recent
+        salt = secrets.token_hex(16)
+        code = new_otp_code()
+        recent = ((rec or {}).get("recent") or []) + [now]
+        _OTP[username] = {"hash": otp_hash(code, salt), "salt": salt,
+                          "exp": now + OTP_TTL, "tries": 0,
+                          "sent": now, "recent": recent}
+    return code, 0
+
+
+def otp_check(username, code):
+    """Try a submitted code. Returns (ok, reason).
+
+    Compares in constant time and counts attempts, so guessing a million
+    combinations is not a viable way in: five wrong guesses burns the code."""
+    now = time.time()
+    code = (code or "").strip()
+    with _OTP_LOCK:
+        rec = _OTP.get(username)
+        if not rec:
+            return False, "expired"
+        if rec.get("exp", 0) < now:
+            _OTP.pop(username, None)
+            return False, "expired"
+        rec["tries"] = rec.get("tries", 0) + 1
+        if rec["tries"] > OTP_MAX_ATTEMPTS:
+            _OTP.pop(username, None)
+            return False, "too_many"
+        given = otp_hash(code, rec["salt"])
+        # secrets.compare_digest, not ==, so the comparison time cannot leak
+        # how much of the hash matched.
+        if secrets.compare_digest(given, rec["hash"]):
+            _OTP.pop(username, None)
+            return True, ""
+        return False, "wrong"
+
+
+def otp_seconds_left(username):
+    """Seconds until the current code expires, or 0 if there is none."""
+    now = time.time()
+    with _OTP_LOCK:
+        rec = _OTP.get(username)
+        if not rec or rec.get("exp", 0) < now:
+            return 0
+        return int(rec["exp"] - now)
+
+
+def otp_forget(username):
+    with _OTP_LOCK:
+        _OTP.pop(username, None)
 
 
 # --- Project ownership + approval queue ---
@@ -3179,6 +3979,14 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                     matched = a
                     break
             if matched is not None:
+                if not account_verified(matched):
+                    # Checked before status: an unverified account's status is
+                    # "unverified", and "waiting for admin approval" would be
+                    # the wrong and discouraging thing to tell them. Nobody has
+                    # to approve this person - they only have to post the code.
+                    self._send_json({"ok": False, "needsCode": True,
+                                     "error": "Confirm your email address first."})
+                    return
                 if account_status(matched) != STATUS_ACTIVE:
                     self._send_json({"ok": False,
                                      "error": "Account pending admin approval."})
@@ -3197,9 +4005,14 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             username = (body.get("username") or "").strip()
             password = body.get("password") or ""
             want_role = (body.get("role") or ROLE_USER).strip().lower()
+            email = clean_email(body.get("email"))
             if not USERNAME_RE.match(username):
                 self._send_json({"ok": False, "error":
                                  "Username must be 3-32 chars (letters, numbers, _ or -)."}, 400)
+                return
+            if username.lower() in RESERVED_USERNAMES:
+                self._send_json({"ok": False, "error":
+                                 "That username is reserved."}, 400)
                 return
             if len(password) < 4 or len(password) > 128:
                 self._send_json({"ok": False, "error":
@@ -3207,34 +4020,186 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 return
             if want_role not in VALID_ROLES:
                 want_role = ROLE_USER
+            # Every account needs a real address now. For a User it is how the
+            # verification code reaches them; for an Admin it is how they learn
+            # they were approved. There is no anonymous signup left.
+            if not email:
+                self._send_json({"ok": False, "error":
+                                 "An email address is required for every account."}, 400)
+                return
+            if not valid_email(email):
+                self._send_json({"ok": False, "error":
+                                 "That email address doesn't look valid."}, 400)
+                return
+            if email and not valid_email(email):
+                self._send_json({"ok": False, "error":
+                                 "That email address doesn't look valid."}, 400)
+                return
             accounts = load_credentials()
             if any((a.get("username") or "") == username for a in accounts):
                 self._send_json({"ok": False, "error": "Username already taken."}, 400)
+                return
+            # One person, one account per address: stops the same mailbox
+            # holding several identities the approver can't tell apart.
+            if email and any(clean_email(a.get("email")) == email for a in accounts):
+                self._send_json({"ok": False, "error":
+                                 "That email address is already registered."}, 409)
                 return
             if len(accounts) >= MAX_ACCOUNTS:
                 self._send_json({"ok": False, "error": "Account limit reached."}, 400)
                 return
             pending_admin = (want_role == ROLE_ADMIN)
+            # A User account is born unverified: it exists, but cannot sign in
+            # until the code mailed to this address comes back. An Admin request
+            # is verified already - its gate is a human approver, not a code.
             accounts.append({"username": username, "password": password,
                              "role": want_role,
-                             "status": STATUS_PENDING if pending_admin else STATUS_ACTIVE})
+                             "email": email,
+                             "verified": True if pending_admin else False,
+                             "status": (STATUS_PENDING if pending_admin
+                                        else STATUS_UNVERIFIED)})
             try:
                 save_credentials(accounts)
             except OSError as e:
                 self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
                 return
             log_line("Auth", f"Registered {username} ({want_role}, "
-                     f"{'pending' if pending_admin else 'active'})")
+                     f"{'pending' if pending_admin else 'unverified'})")
             # Notify on EVERY signup, not just admin ones: you asked to be told
             # when an account is created, and a plain User account still
             # appearing is news (it may be someone you don't recognise).
-            notify_account_created(username, want_role, pending_admin)
+            notify_account_created(username, want_role, pending_admin, email)
+
             if pending_admin:
+                # Confirm to the applicant themselves. Synchronous so the response
+                # can tell them honestly whether it landed - telling someone
+                # "check your email" when nothing was sent is the same false
+                # success the approval path was fixed for.
+                ack_ok, ack_why = notify_account_received(username, email, want_role)
+                msg = ("Admin request sent - wait for approval, then sign in.")
+                if ack_ok:
+                    msg += (f" We've emailed {email} to confirm, and you'll "
+                            f"get a second message there when it's decided.")
+                else:
+                    msg += (f" We could NOT send that confirmation email "
+                            f"({ack_why}). Save this address: {email}")
                 self._send_json({"ok": True, "status": STATUS_PENDING,
-                                 "message": "Admin request sent - wait for approval, then sign in."})
+                                 "email": email, "acknowledged": ack_ok,
+                                 "emailNotice": ack_why if not ack_ok else "",
+                                 "message": msg})
             else:
-                self._send_json({"ok": True, "status": STATUS_ACTIVE,
-                                 "message": "Account created - sign in."})
+                # A User: no administrator is involved at any point. Mail the
+                # code and hand back exactly what happened, so the page can say
+                # whether to wait for an inbox or to offer a resend.
+                code, wait = otp_issue(username)
+                if wait:
+                    # Cannot happen on a brand-new account, but if it ever does
+                    # the account still exists and the page can offer a resend.
+                    self._send_json({"ok": True, "status": STATUS_UNVERIFIED,
+                                     "email": email, "needsCode": True,
+                                     "retryAfter": wait,
+                                     "message": "Account created. Wait a moment "
+                                                "before requesting a code."})
+                    return
+                sent, why = notify_account_code(username, email, code)
+                if sent:
+                    msg = (f"Account created. We've emailed a 6-digit code to "
+                           f"{email} - enter it to finish setting up. No "
+                           f"approval needed.")
+                else:
+                    # Honest failure: the account exists but is unusable until a
+                    # code arrives. Say that rather than implying all is well.
+                    msg = (f"Account created, but we could NOT send the code "
+                           f"({why}). It cannot be used until a code arrives - "
+                           f"press Resend once mail is working.")
+                    log_line("Auth", f"code NOT sent for {username}: {why}")
+                self._send_json({"ok": True, "status": STATUS_UNVERIFIED,
+                                 "email": email, "needsCode": True,
+                                 "codeSent": sent,
+                                 "codeNotice": "" if sent else why,
+                                 "message": msg})
+            return
+
+        if path == "/api/verify/request":
+            # (Re)send a verification code. Open to anyone who knows a username
+            # and controls the mailbox - the code is the authentication, so
+            # there is nothing here to guard beyond not being a mail cannon.
+            body = self._read_body()
+            username = (body.get("username") or "").strip()
+            accounts = load_credentials()
+            entry = next((a for a in accounts
+                          if (a.get("username") or "") == username), None)
+            if entry is None:
+                self._send_json({"ok": False, "error": "Unknown account."}, 404)
+                return
+            if account_verified(entry):
+                self._send_json({"ok": False, "error":
+                                 "That account is already verified."}, 400)
+                return
+            if account_status(entry) == STATUS_PENDING:
+                self._send_json({"ok": False, "error":
+                                 "That request is waiting for admin approval."}, 400)
+                return
+            code, wait = otp_issue(username)
+            if wait:
+                self._send_json({"ok": False, "retryAfter": wait,
+                                 "error": f"Wait {wait}s before requesting "
+                                          f"another code."}, 429)
+                return
+            sent, why = notify_account_code(username, entry.get("email"), code)
+            if sent:
+                log_line("Auth", f"Code re-sent for {username}")
+                self._send_json({"ok": True, "codeSent": True,
+                                 "expiresIn": OTP_TTL,
+                                 "message": f"Code emailed to "
+                                            f"{clean_email(entry.get('email'))}."})
+            else:
+                log_line("Auth", f"code NOT sent for {username}: {why}")
+                self._send_json({"ok": False, "codeSent": False,
+                                 "error": f"Could not send the code: {why}"}, 502)
+            return
+
+        if path == "/api/verify/confirm":
+            # Exchange the code for a usable account. This is the moment a User
+            # stops needing anyone else's permission.
+            body = self._read_body()
+            username = (body.get("username") or "").strip()
+            code = (body.get("code") or "").strip()
+            accounts = load_credentials()
+            entry = next((a for a in accounts
+                          if (a.get("username") or "") == username), None)
+            if entry is None:
+                self._send_json({"ok": False, "error": "Unknown account."}, 404)
+                return
+            if account_verified(entry):
+                self._send_json({"ok": True, "alreadyVerified": True,
+                                 "message": "That account is already verified."})
+                return
+            if not re.fullmatch(r"\d{6}", code):
+                # Cheap rejection before spending an attempt on a typo, so six
+                # digits is not six tries.
+                self._send_json({"ok": False, "error": "Enter the 6-digit code."}, 400)
+                return
+            good, why = otp_check(username, code)
+            if not good:
+                msg = {"wrong": "That code isn't right. Check it and try again.",
+                       "expired": "That code has expired - request a new one.",
+                       "too_many": "Too many wrong attempts. Request a new code."}[why]
+                self._send_json({"ok": False, "error": msg,
+                                 "reason": why}, 400)
+                return
+            entry["verified"] = True
+            entry["status"] = STATUS_ACTIVE
+            try:
+                save_credentials(accounts)
+            except OSError as e:
+                otp_forget(username)
+                self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
+                return
+            log_line("Auth", f"Verified {username} by email code")
+            self._send_json({"ok": True, "status": STATUS_ACTIVE,
+                             "username": username,
+                             "message": "Email confirmed - you can sign in now."})
             return
 
         if path == "/api/notify-test":
@@ -3246,25 +4211,52 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": _err}, 403)
                 return
             cfg = notify_config()
-            key = str(cfg.get("resendApiKey") or "").strip()
             to = str(cfg.get("to") or "").strip()
+            provider = notify_provider(cfg)
             if cfg.get("enabled") is False:
                 self._send_json({"ok": False, "error": "Notifications are disabled in notify.json."}, 400)
                 return
-            if not key or not to:
+            if not provider or not to:
                 self._send_json({"ok": False,
-                                 "error": "No api key or recipient - check notify.json."}, 400)
+                                 "error": "No mail provider or recipient - check notify.json."}, 400)
                 return
-            ok, detail = _send_resend(
+            # Report the sender's real state up front. A test to your own
+            # inbox succeeds even when the `from` is unregistered, which is
+            # exactly how a broken config hides for months.
+            domain_note = ""
+            if provider == "brevo":
+                ok_sender, note = _brevo_diagnostics(cfg)
+                domain_note = note if not ok_sender else (
+                    note if ("no DKIM" in note or "not a verified" in note)
+                    else f"Brevo: {note}")
+            # Built with the same layout helpers as real notifications, so what
+            # arrives here is exactly what an approval request will look like.
+            _svc = "Brevo" if provider == "brevo" else "Resend"
+            _rows = [("Recipient", to), ("Sender", cfg.get("from") or "-"),
+                     ("Service", _svc), ("Instance", f"{INSTANCE} (slot {SLOT})")]
+            if domain_note:
+                _rows.append(("Sender check", domain_note))
+            _cta = ("Open the dashboard", dashboard_link())
+            _note = ("If this arrived and looks right, approval requests will "
+                     "reach you the same way. No action needed.")
+            _footer = _notify_footer()
+            ok, detail = _send_email(
                 cfg, f"[{INSTANCE}] Test e-mail",
-                f"This is a test from your Project Manager.\n\n"
-                f"Open the dashboard: {dashboard_link()}\n\n"
-                f"If you can read this, approval requests will reach you too.")
+                _mail_text("Test e-mail", "Notifications are working. "
+                          "Nothing to approve - this is only a check that your "
+                          "inbox and the mail service are talking to each other.",
+                          _rows, _cta, _note, _footer),
+                _mail_html("Test e-mail", "Notifications are working",
+                           "Nothing to approve - this is only a check that your "
+                           "inbox and the mail service are talking to each other.",
+                           _rows, _cta, _note, _footer))
             _notify_log(f"{time.strftime('%H:%M:%S')} "
                         f"{'SENT (test)' if ok else 'FAILED (test)'}: {detail[:120]}")
-            self._send_json({"ok": ok, "error": None if ok else detail,
-                             "message": (f"Test e-mail sent to {to}."
+            self._send_json({"ok": ok,
+                             "error": None if ok else _notify_failure_reason(detail, to),
+                             "message": (f"Test e-mail sent to {to} via {_svc}."
                                          if ok else "Send failed."),
+                             "domainNote": domain_note,
                              "detail": detail}, 200 if ok else 502)
             return
 
@@ -3275,9 +4267,15 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             if _err:
                 self._send_json({"ok": False, "error": _err}, 403)
                 return
+            # Admin-only. Includes each account's email so an approver can see
+            # who they are about to grant access to; never the password.
             self._send_json({"ok": True, "accounts": [
                 {"username": a.get("username", ""), "role": account_role(a),
-                 "status": account_status(a)} for a in load_credentials()]})
+                 "status": account_status(a),
+                 "super": is_super_admin(a),
+                 "verified": account_verified(a),
+                 "email": clean_email(a.get("email"))}
+                for a in load_credentials()]})
             return
 
         if path == "/api/accounts/approve":
@@ -3297,6 +4295,13 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             if account_status(entry) != STATUS_PENDING:
                 self._send_json({"ok": False, "error": "Account is already active."}, 400)
                 return
+            # Belt and braces: nothing unverified should be sitting in the
+            # approval queue, and approving one would hand out a working
+            # account for an address nobody proved they own.
+            if not account_verified(entry):
+                self._send_json({"ok": False, "error":
+                                 "That account has not confirmed its email."}, 400)
+                return
             entry["status"] = STATUS_ACTIVE
             try:
                 save_credentials(accounts)
@@ -3304,12 +4309,39 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
                 return
             log_line("Auth", f"Approved {target} ({account_role(entry)})")
-            self._send_json({"ok": True, "message": f"Approved {target}."})
+            # Tell the applicant. `sent` is the mail API's real verdict, so the
+            # message never claims a delivery that was rejected. Approval itself
+            # stands either way - the admin is just told the applicant is unaware.
+            sent, why = notify_account_decision(
+                target, entry.get("email"), account_role(entry), True,
+                _admin.get("username", ""))
+            addr = clean_email(entry.get("email"))
+            if sent:
+                self._send_json({"ok": True, "notified": True,
+                                 "message": f"Approved {target}. Decision e-mail "
+                                            f"sent to {addr}."})
+            else:
+                log_line("Auth", f"approval e-mail NOT sent for {target}: {why}")
+                # Name the address when we have one; otherwise say plainly that
+                # there isn't one, rather than "but they was NOT emailed".
+                who = f"{addr} was" if addr else "they were"
+                self._send_json({
+                    "ok": True, "notified": False,
+                    "message": f"Approved {target}, but {who} NOT emailed - {why}. "
+                               f"Tell them yourself.",
+                    "warning": True})
             return
 
         if path == "/api/accounts/remove":
-            # Reject pending signups or remove active accounts (not yourself,
-            # never the last active admin - avoids locking everyone out).
+            # Reject pending signups or remove active accounts. Three guards,
+            # cheapest first: not yourself, never the super admin, and never
+            # the last active admin.
+            #
+            # The third is unreachable over HTTP now that the super admin is
+            # permanent - the requester is themselves an active admin and can
+            # never be the target, so one always survives. It is kept as
+            # defence in depth for any future caller that is not an admin
+            # session, so do not treat it as the thing protecting the panel.
             body = self._read_body()
             _admin, _err = requester_is_admin(body)
             if _err:
@@ -3319,14 +4351,18 @@ class ManagerHandler(SimpleHTTPRequestHandler):
             if target == (_admin.get("username") or ""):
                 self._send_json({"ok": False, "error": "Cannot remove yourself."}, 400)
                 return
-            if _read_credentials_file() is None and target == DEFAULT_ADMIN["username"]:
-                self._send_json({"ok": False, "error": "Cannot remove the default admin."}, 400)
-                return
             accounts = load_credentials()
             entry = next((a for a in accounts
                           if (a.get("username") or "") == target), None)
             if entry is None:
                 self._send_json({"ok": False, "error": "Unknown account."}, 404)
+                return
+            # The owner account is unremovable, by anyone including itself.
+            # This is the guard that matters: without it an admin can delete the
+            # only account that can restore the panel.
+            if is_super_admin(entry):
+                self._send_json({"ok": False, "error":
+                                 "The super admin cannot be removed."}, 400)
                 return
             rest = [a for a in accounts if (a.get("username") or "") != target]
             if (account_role(entry) == ROLE_ADMIN
@@ -3335,13 +4371,33 @@ class ManagerHandler(SimpleHTTPRequestHandler):
                                 and account_status(a) == STATUS_ACTIVE for a in rest)):
                 self._send_json({"ok": False, "error": "Cannot remove the last admin."}, 400)
                 return
+            # Read these before the row disappears from the list.
+            was_pending = account_status(entry) == STATUS_PENDING
+            was_admin = account_role(entry) == ROLE_ADMIN
+            entry_email = clean_email(entry.get("email"))
             try:
                 save_credentials(rest)
             except OSError as e:
                 self._send_json({"ok": False, "error": f"Could not save: {e}"}, 500)
                 return
             log_line("Auth", f"Removed {target}")
-            self._send_json({"ok": True, "message": f"Removed {target}."})
+            # Only decline a *pending admin request* by mail. Removing an
+            # already-active account is a different act and gets no mail.
+            sent, why = False, ""
+            if was_pending and was_admin:
+                sent, why = notify_account_decision(
+                    target, entry_email, ROLE_ADMIN, False,
+                    _admin.get("username", ""))
+                if not sent:
+                    log_line("Auth", f"decline e-mail NOT sent for {target}: {why}")
+            self._send_json({
+                "ok": True, "notified": sent,
+                "warning": bool(was_pending and was_admin and not sent),
+                "message": f"Removed {target}." + (
+                    f" Decision e-mail sent to {entry_email}."
+                    if sent else (
+                        f" They were NOT emailed - {why}."
+                        if was_pending and was_admin else ""))})
             return
 
         if path == "/api/upload":

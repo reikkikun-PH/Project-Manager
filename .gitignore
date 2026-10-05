@@ -12,8 +12,11 @@ projects.json
 credentials.json
 project_auth.json
 **/credentials.json
-# Approval e-mail settings (contains the Resend API key) - local only
+# Approval e-mail settings (contains the Brevo/Resend API key) - local only.
+# The notify.json.* pattern matters: a manual backup of that file carries the
+# live key too, and would otherwise be one `git add .` away from being pushed.
 notify.json
+notify.json.*
 notify.log
 
 # Runtime logs / tunnel state
